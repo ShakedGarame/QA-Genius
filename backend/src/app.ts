@@ -30,6 +30,10 @@ const app = express();
 const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:5173";
 const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
 
+if (isProduction) {
+  app.set("trust proxy", 1);
+}
+
 // ─── Session store (PostgreSQL — works on Vercel) ─────────────────────────────
 
 const PgSession = connectPgSimple(session);
