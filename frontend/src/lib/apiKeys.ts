@@ -22,6 +22,23 @@ export function setStoredOpenAIKey(key: string | null): void {
   }
 }
 
+/** True when the value looks like a real key (not the server masked placeholder). */
+export function isRealOpenAIKey(value: string | null | undefined): boolean {
+  if (!value?.trim()) return false;
+  if (value.includes("•")) return false;
+  return value.startsWith("sk-");
+}
+
+/** Persist while typing so refresh + generate work without relying on Save alone. */
+export function syncOpenAIKeyToStorage(value: string): void {
+  if (value.includes("•")) return;
+  if (isRealOpenAIKey(value)) {
+    setStoredOpenAIKey(value.trim());
+  } else if (!value.trim()) {
+    setStoredOpenAIKey(null);
+  }
+}
+
 /** Headers to attach to backend AI routes when a client-side key is available. */
 export function buildOpenAIKeyHeaders(): Record<string, string> {
   const key = getStoredOpenAIKey();

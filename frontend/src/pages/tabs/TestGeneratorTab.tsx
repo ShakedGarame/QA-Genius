@@ -359,6 +359,12 @@ export default function TestGeneratorTab() {
     }
     setFeatureNameError("");
 
+    const userKey = readOpenAIKeyForRequest();
+    if (!userKey) {
+      setGenError("OpenAI API key missing. Open Settings, paste your sk-… key (it saves automatically), then try again.");
+      return;
+    }
+
     if (!pendingInput && !editedCode) {
       setGenError("Please provide a PRD or Swagger file / text first");
       return;
@@ -394,6 +400,10 @@ export default function TestGeneratorTab() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Generation failed");
+
+      if (json.data?.isMock) {
+        throw new Error("Server returned demo mode — your API key was not received. Re-paste it in Settings and try again.");
+      }
 
       const r: GenerateResult = {
         ...(json.data as GenerateTestsResult),

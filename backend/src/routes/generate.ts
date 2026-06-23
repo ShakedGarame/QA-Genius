@@ -6,7 +6,7 @@ import { parseRawText, parseFileBuffer, parseSwaggerBuffer, parseSwaggerText } f
 import { GenerateTestsRequest, FeatureMeta } from "../types/index.js";
 import { getUserSettings, saveGeneratedTest, upsertFeatureMeta } from "../db.js";
 import type { DbUser } from "../db.js";
-import { extractOpenAIKeyFromRequest } from "../lib/requestKeys.js";
+import { resolveOpenAIKeySource } from "../lib/requestKeys.js";
 
 const router = Router();
 
@@ -67,7 +67,7 @@ router.post(
     }
 
     const userSettings = await getUserSettings(userId);
-    const openaiKey = extractOpenAIKeyFromRequest(req, userSettings);
+    const { key: openaiKey, source: keySource } = resolveOpenAIKeySource(req, userSettings);
     const llmOptions = { openaiKey };
 
     try {
@@ -102,6 +102,7 @@ router.post(
           featureName: featureName.trim(),
           featureSlug,
           savedAs: specFileName,
+          keySource,
         });
       }
 
@@ -136,6 +137,7 @@ router.post(
         featureName: featureName.trim(),
         featureSlug,
         savedAs: specFileName,
+        keySource,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Generation failed";

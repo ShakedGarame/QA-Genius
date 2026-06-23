@@ -12,7 +12,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import clsx from "clsx";
-import { getStoredOpenAIKey, setStoredOpenAIKey } from "../../lib/apiKeys";
+import { getStoredOpenAIKey, setStoredOpenAIKey, syncOpenAIKeyToStorage, isRealOpenAIKey } from "../../lib/apiKeys";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -142,8 +142,8 @@ export default function SettingsTab() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Local form state (only set from server on first load, then locally controlled)
-  const [openaiKey, setOpenaiKey] = useState("");
+  // Local form state — initialize from localStorage so refresh keeps the key visible.
+  const [openaiKey, setOpenaiKey] = useState(() => getStoredOpenAIKey() ?? "");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [coralogixKey, setCoralogixKey] = useState("");
   const [coralogixTeam, setCoralogixTeam] = useState("");
@@ -153,12 +153,12 @@ export default function SettingsTab() {
   // Coralogix connection test
   const [testingCoralogix, setTestingCoralogix] = useState(false);
   const [coralogixStatus, setCoralogixStatus] = useState<"idle" | "ok" | "fail">("idle");
+  const [serverHasOpenAI, setServerHasOpenAI] = useState(false);
 
-  // Hydrate OpenAI key from localStorage immediately so refresh keeps the field populated.
-  useEffect(() => {
-    const stored = getStoredOpenAIKey();
-    if (stored) setOpenaiKey(stored);
-  }, []);
+  const handleOpenAIKeyChange = (value: string) => {
+    setOpenaiKey(value);
+    syncOpenAIKeyToStorage(value);
+  };
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -168,8 +168,18 @@ export default function SettingsTab() {
       if (!res.ok) throw new Error("Failed to load settings");
       const settings: SettingsData = await res.json();
       setData(settings);
+      setServerHasOpenAI(!!settings.openai_api_key);
+
       const storedOpenAI = getStoredOpenAIKey();
-      setOpenaiKey(storedOpenAI ?? settings.openai_api_key ?? "");
+      if (storedOpenAI) {
+        setOpenaiKey(storedOpenAI);
+      } else if (settings.openai_api_key?.includes("•")) {
+        // Server has a saved key but this browser does not — keep field empty, ask user to paste again.
+        setOpenaiKey("");
+      } else if (settings.openai_api_key) {
+        setOpenaiKey(settings.openai_api_key);
+        syncOpenAIKeyToStorage(settings.openai_api_key);
+      }
       setAnthropicKey(settings.anthropic_api_key ?? "");
       setCoralogixKey(settings.coralogix_api_key ?? "");
       setCoralogixTeam(settings.coralogix_team_name ?? "");
@@ -191,9 +201,12 @@ export default function SettingsTab() {
     try {
       const body: Record<string, string> = {};
       // Only send keys that have changed (don't overwrite with masked placeholder)
-      if (!openaiKey.includes("•")) {
-        body.openai_api_key = openaiKey;
-        setStoredOpenAIKey(openaiKey.trim() || null);
+      if (isRealOpenAIKey(openaiKey)) {
+        body.openai_api_key = openaiKey.trim();
+        setStoredOpenAIKey(openaiKey.trim());
+      } else if (!openaiKey.trim()) {
+        body.openai_api_key = "";
+        setStoredOpenAIKey(null);
       }
       if (!anthropicKey.includes("•")) body.anthropic_api_key = anthropicKey;
       if (!coralogixKey.includes("•")) body.coralogix_api_key = coralogixKey;
@@ -243,8 +256,9 @@ export default function SettingsTab() {
 
   // Derived state
   const storedOpenAI = getStoredOpenAIKey();
-  const aiActive = !!(data?.env_has_openai || data?.env_has_anthropic || storedOpenAI || openaiKey || anthropicKey);
-  const hasUserOpenAI = !!(storedOpenAI || (openaiKey && !openaiKey.includes("•")));
+  const hasRealOpenAIKey = isRealOpenAIKey(storedOpenAI) || isRealOpenAIKey(openaiKey);
+  const aiActive = !!(data?.env_has_openai || data?.env_has_anthropic || hasRealOpenAIKey);
+  const hasUserOpenAI = hasRealOpenAIKey;
   const coralogixActive = !!(data?.env_has_coralogix || coralogixKey);
 
   if (loading) {
@@ -295,14 +309,21 @@ export default function SettingsTab() {
             id="openai-key"
             label="OpenAI API Key"
             value={openaiKey}
-            onChange={setOpenaiKey}
+            onChange={handleOpenAIKeyChange}
             placeholder="sk-…"
             hint={
               data?.env_has_openai
                 ? "Optional: your key takes priority over the backend environment key."
-                : "Required for real AI generation. Leave empty to use the interactive demo mode."
+                : "Required for real AI generation. Saved automatically in this browser as you type."
             }
           />
+
+          {serverHasOpenAI && !hasRealOpenAIKey && (
+            <p className="text-[11px] text-amber-400 flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              A key is saved on your account — paste it here once to activate this browser.
+            </p>
+          )}
 
           {hasUserOpenAI && (
             <p className="text-[11px] text-sky-400 flex items-center gap-1">
