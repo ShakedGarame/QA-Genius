@@ -11,7 +11,7 @@ import TestEditor from "../../components/qa-genius/TestEditor";
 import ExecutionConsole from "../../components/qa-genius/ExecutionConsole";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 import { useTestRunner } from "../../hooks/useTestRunner";
-import { buildOpenAIKeyHeaders } from "../../lib/apiKeys";
+import { buildOpenAIKeyHeaders, readOpenAIKeyForRequest } from "../../lib/apiKeys";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
 
 // ─── Feature Name Input ───────────────────────────────────────────────────────
@@ -382,6 +382,9 @@ export default function TestGeneratorTab() {
         setGenError("Please provide input first");
         return;
       }
+
+      const userKey = readOpenAIKeyForRequest();
+      if (userKey) formData.append("openaiApiKey", userKey);
 
       const res = await fetch("/api/generate-tests", {
         method: "POST",

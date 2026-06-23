@@ -12,7 +12,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import clsx from "clsx";
-import { setStoredOpenAIKey } from "../../lib/apiKeys";
+import { getStoredOpenAIKey, setStoredOpenAIKey } from "../../lib/apiKeys";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -154,6 +154,12 @@ export default function SettingsTab() {
   const [testingCoralogix, setTestingCoralogix] = useState(false);
   const [coralogixStatus, setCoralogixStatus] = useState<"idle" | "ok" | "fail">("idle");
 
+  // Hydrate OpenAI key from localStorage immediately so refresh keeps the field populated.
+  useEffect(() => {
+    const stored = getStoredOpenAIKey();
+    if (stored) setOpenaiKey(stored);
+  }, []);
+
   const loadSettings = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -162,7 +168,8 @@ export default function SettingsTab() {
       if (!res.ok) throw new Error("Failed to load settings");
       const settings: SettingsData = await res.json();
       setData(settings);
-      setOpenaiKey(settings.openai_api_key ?? "");
+      const storedOpenAI = getStoredOpenAIKey();
+      setOpenaiKey(storedOpenAI ?? settings.openai_api_key ?? "");
       setAnthropicKey(settings.anthropic_api_key ?? "");
       setCoralogixKey(settings.coralogix_api_key ?? "");
       setCoralogixTeam(settings.coralogix_team_name ?? "");
@@ -203,7 +210,10 @@ export default function SettingsTab() {
       if (!res.ok) throw new Error("Save failed");
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-      await loadSettings(); // reload masked values
+      // Keep the full key visible from localStorage — do not replace with masked server value.
+      const storedAfterSave = getStoredOpenAIKey();
+      if (storedAfterSave) setOpenaiKey(storedAfterSave);
+      else await loadSettings();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -232,8 +242,9 @@ export default function SettingsTab() {
   };
 
   // Derived state
-  const aiActive = !!(data?.env_has_openai || data?.env_has_anthropic || openaiKey || anthropicKey);
-  const hasUserOpenAI = !!openaiKey && !openaiKey.includes("•");
+  const storedOpenAI = getStoredOpenAIKey();
+  const aiActive = !!(data?.env_has_openai || data?.env_has_anthropic || storedOpenAI || openaiKey || anthropicKey);
+  const hasUserOpenAI = !!(storedOpenAI || (openaiKey && !openaiKey.includes("•")));
   const coralogixActive = !!(data?.env_has_coralogix || coralogixKey);
 
   if (loading) {

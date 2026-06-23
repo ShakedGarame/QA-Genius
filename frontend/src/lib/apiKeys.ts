@@ -26,5 +26,13 @@ export function setStoredOpenAIKey(key: string | null): void {
 export function buildOpenAIKeyHeaders(): Record<string, string> {
   const key = getStoredOpenAIKey();
   if (!key) return {};
-  return { "x-openai-key": key };
+  return {
+    "x-user-openai-key": key,
+    "x-openai-key": key,
+  };
+}
+
+/** Read key fresh from storage right before a network call. */
+export function readOpenAIKeyForRequest(): string | null {
+  return getStoredOpenAIKey();
 }
