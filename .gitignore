@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+frontend/dist/
+backend/dist/
+uploads/
+generated-tests/
+
+# Playwright artifacts (generated at runtime — do not commit)
+test-results/
+playwright-report/
+tests/generated/
+
+# Database & session store (user data — never commit)
+data/

@@ -1,0 +1,23 @@
+{
+  "name": "qa-genius-portfolio",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "build:vercel": "npm run db:generate --workspace=backend && npm run db:deploy --workspace=backend && npm run build --workspace=backend && npm run build --workspace=frontend",
+    "db:generate": "npm run db:generate --workspace=backend",
+    "db:push": "npm run db:push --workspace=backend",
+    "install:all": "npm install && npm install --workspace=frontend && npm install --workspace=backend"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.0",
+    "@vercel/node": "^5.3.21",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.5.2"
+  }
+}

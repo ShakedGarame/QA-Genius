@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(uuid())
+  githubId   String?  @unique @map("github_id")
+  googleId   String?  @unique @map("google_id")
+  email      String?
+  name       String
+  avatarUrl  String?  @map("avatar_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastLogin  DateTime @default(now()) @map("last_login")
+
+  settings    UserSettings?
+  features    Feature[]
+  logAnalyses LogAnalysis[]
+
+  @@map("users")
+}
+
+model UserSettings {
+  userId            String  @id @map("user_id")
+  openaiApiKey      String? @map("openai_api_key")
+  anthropicApiKey   String? @map("anthropic_api_key")
+  coralogixApiKey   String? @map("coralogix_api_key")
+  coralogixTeamName String? @map("coralogix_team_name")
+  coralogixRegion   String? @default("EU") @map("coralogix_region")
+  testsOutputDir    String? @map("tests_output_dir")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model Feature {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  slug        String
+  featureName String   @map("feature_name")
+  inputType   String   @map("input_type")
+  description String?
+  prdText     String?  @map("prd_text")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tests GeneratedTest[]
+
+  @@unique([userId, slug])
+  @@map("features")
+}
+
+model GeneratedTest {
+  id        String   @id @default(uuid())
+  featureId String   @map("feature_id")
+  fileName  String   @map("file_name")
+  code      String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  feature Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@unique([featureId, fileName])
+  @@map("generated_tests")
+}
+
+model LogAnalysis {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  source       String
+  rawLogs      String   @map("raw_logs") @db.Text
+  rootCause    String   @map("root_cause") @db.Text
+  explanation  String   @db.Text
+  suggestedFix String   @map("suggested_fix") @db.Text
+  severity     String
+  category     String
+  isMock       Boolean  @default(false) @map("is_mock")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("log_analyses")
+}

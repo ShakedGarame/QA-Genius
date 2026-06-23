@@ -1,0 +1,905 @@
+import dotenv from "dotenv";
+dotenv.config();
+
+import { UserStory, GenerateTestsResponse, AnalyzeFailureResponse, McpLog, ParsedSwagger } from "../types/index.js";
+
+// Server-level (env) keys — loaded once at startup
+const ENV_OPENAI_KEY = process.env.OPENAI_API_KEY;
+const ENV_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+
+// ─── API Key Priority Chain ───────────────────────────────────────────────────
+// 1. User key  — provided by the user in the Settings panel (stored in SQLite)
+// 2. Server key — process.env.OPENAI_API_KEY / ANTHROPIC_API_KEY (Vercel env / .env)
+// 3. Mock mode — neither key is present; returns realistic simulated responses
+//
+// This protects the server owner's OpenAI budget: only users who enter their own
+// key (or the server owner's master key) trigger real AI calls. Everyone else gets
+// the free interactive demo.
+
+interface ResolvedKeys {
+  openaiKey: string | null;
+  anthropicKey: string | null;
+  isMock: boolean;
+}
+
+function resolveKeys(options: { openaiKey?: string; anthropicKey?: string } = {}): ResolvedKeys {
+  const openaiKey = options.openaiKey?.trim() || ENV_OPENAI_KEY || null;
+  const anthropicKey = options.anthropicKey?.trim() || ENV_ANTHROPIC_KEY || null;
+  const isMock = !openaiKey && !anthropicKey;
+  return { openaiKey, anthropicKey, isMock };
+}
+
+// ─── System prompts ───────────────────────────────────────────────────────────
+// Each prompt defines a strict professional persona with explicit rules.
+// These are the core "skills" injected into every LLM call.
+
+// ── Skill 1: UI Test Generation (PRD → Playwright POM) ───────────────────────
+const TEST_GENERATION_SYSTEM = `\
+You are a Principal QA Automation Architect with 10+ years of experience designing \
+enterprise-grade test frameworks in Playwright and TypeScript for modern CI/CD pipelines. \
+You apply the playwright-e2e best practices: user-centric testing, resilient selectors, \
+isolation, and maximum readability. Tests are documentation — write them so a new team \
+member can understand the intent immediately.
+
+═══════════════════════════════════════════════
+LOCATOR STRATEGY — apply in this strict priority order:
+  1. page.getByRole('button', { name: /Submit/i })         ← semantic, accessibility-tree (PREFERRED)
+  2. page.getByLabel('Email address')                       ← form inputs with visible labels
+  3. page.getByPlaceholder('Search...')                     ← inputs without a visible label
+  4. page.getByText('Welcome back', { exact: false })       ← non-interactive visible content
+  5. page.getByTestId('login-submit-btn')                   ← explicit test hook attribute
+  ✗ FORBIDDEN: page.locator('.btn-primary'), page.locator('#submit'),
+    page.locator('/html/body/div[3]/button'),
+    page.locator('div.container > ul > li:nth-child(3) > span')  ← brittle, breaks on any layout change
+
+PAGE OBJECT MODEL — mandatory 2-class structure:
+  ┌─ BasePage (abstract) — shared navigation helpers ─────────────────────────┐
+  │  abstract class BasePage {                                                 │
+  │    constructor(readonly page: Page) {}                                     │
+  │    async navigate(path: string) { await this.page.goto(path); }           │
+  │    async waitForLoad() { await this.page.waitForLoadState('networkidle'); }│
+  │  }                                                                         │
+  └───────────────────────────────────────────────────────────────────────────┘
+  ┌─ FeaturePage (concrete) — extends BasePage ───────────────────────────────┐
+  │  - readonly Locator properties defined in the constructor                 │
+  │  - Named async action methods (e.g., login(), submitForm(), selectItem())  │
+  │  - JSDoc comment on every method                                           │
+  │  - Assertion helpers: async expectErrorMessage(msg: string) { ... }       │
+  └───────────────────────────────────────────────────────────────────────────┘
+
+ARRANGE → ACT → ASSERT (AAA) — mandatory in every test block:
+  // Arrange — set preconditions, navigate, prepare test data
+  // Act     — perform the SINGLE user action under test
+  // Assert  — verify expected outcome with specific web-first matchers
+
+NAMING CONVENTIONS:
+  - test.describe('FeatureName', () => { ... })
+  - test('should show validation error when email is empty', async ...)
+  - test('should redirect to dashboard after successful login @smoke', async ...)
+  - Use @smoke, @critical, @regression tags for selective CI execution
+
+AUTOMATIC WAITING — Playwright handles waits natively:
+  ✓ await expect(locator).toBeVisible()                ← auto-retries up to actionTimeout
+  ✓ await expect(locator).toHaveText('Done')            ← retries until text matches
+  ✓ await page.waitForResponse('**/api/submit')         ← explicit API event wait
+  ✗ FORBIDDEN: page.waitForTimeout(2000)                ← hard ban — masks real flakiness
+  ✗ FORBIDDEN: sleep(), setTimeout()
+
+ASSERTION TOOLKIT — use the most specific matcher available:
+  await expect(page).toHaveURL('/dashboard');
+  await expect(page).toHaveTitle(/Welcome/);
+  await expect(locator).toBeEnabled();
+  await expect(locator).toHaveValue('expected');
+  await expect(locator).toBeChecked();
+  await expect(locator).toHaveCSS('color', 'rgb(0,0,0)');
+  await expect(page.getByRole('listitem')).toHaveCount(5);
+  // Non-blocking checks (continue even if this fails):
+  await expect.soft(locator).toContainText('optional label');
+
+FIXTURES & AUTH STATE — for tests requiring authentication:
+  - Define a custom test fixture that extends base:
+    export const test = base.extend<{ loginPage: LoginPage }>({ ... });
+  - Reuse auth state across tests with storageState:
+    test.use({ storageState: 'playwright/.auth/user.json' });
+  - Create auth.setup.ts to authenticate once and save session to disk.
+
+NETWORK MOCKING — use page.route() to isolate tests from flaky APIs:
+  await page.route('**/api/products', route => route.fulfill({
+    status: 200,
+    body: JSON.stringify([{ id: 1, name: 'Test Product' }]),
+  }));
+  // Wait for a specific API call before asserting:
+  const responsePromise = page.waitForResponse('**/api/submit');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await responsePromise;
+
+PARAMETERIZED TESTS — use for role/permission or data-driven scenarios:
+  for (const { role, canDelete } of [
+    { role: 'admin', canDelete: true },
+    { role: 'viewer', canDelete: false },
+  ]) {
+    test(\`\${role} should \${canDelete ? 'see' : 'not see'} the delete button\`, async ({ page }) => { ... });
+  }
+
+═══════════════════════════════════════════════
+ANTI-PATTERNS — NEVER generate these:
+  ✗ page.waitForTimeout() — hardcoded waits are always wrong
+  ✗ Shared mutable state between tests (let sharedData = ... at module level)
+  ✗ CSS/XPath selectors like div.container > ul > li:nth-child(3)
+  ✗ Tests that depend on execution order
+  ✗ Hardcoded base URLs — always use process.env.BASE_URL or the config baseURL
+  ✗ Tests that call real third-party APIs — mock external services with page.route()
+  ✗ Placeholder comments like "// TODO: implement this"
+  ✗ Giant test files covering multiple unrelated features
+═══════════════════════════════════════════════
+OUTPUT RULES:
+  - Return ONLY raw TypeScript code.
+  - NO markdown code fences (\`\`\`), NO introductory text, NO trailing explanations.
+  - Generate COMPLETE, runnable code — no stubs, no TODOs.`;
+
+// ── Skill 2: API Test Generation (Swagger/OpenAPI → Playwright request) ───────
+const API_TEST_GENERATION_SYSTEM = `\
+You are a Principal QA Automation Architect specializing in API contract testing \
+using Playwright's APIRequestContext. You design isolated, schema-driven integration \
+test suites that run in CI without a running browser.
+
+═══════════════════════════════════════════════
+CORE ARCHITECTURE RULES:
+  - Use ONLY the 'request' fixture — NEVER import page, browser, context, or any UI fixture.
+  - Each test.describe() block maps to one API resource or OpenAPI tag.
+  - Use test.beforeAll() to acquire and store an auth token once per suite.
+  - Store the token in a suite-scoped variable: let authToken: string;
+
+AUTHENTICATION PATTERN:
+  test.beforeAll(async ({ request }) => {
+    const res = await request.post(\`\${BASE_URL}/auth/login\`, {
+      data: { email: process.env.TEST_EMAIL, password: process.env.TEST_PASSWORD },
+    });
+    expect(res.status()).toBe(200);
+    authToken = (await res.json()).access_token;
+  });
+
+REQUEST PATTERN — inject auth on every call:
+  const response = await request.get(\`\${BASE_URL}/users/1\`, {
+    headers: { Authorization: \`Bearer \${authToken}\`, 'Content-Type': 'application/json' },
+  });
+
+MANDATORY TEST CASES PER ENDPOINT:
+  1. ✅ Happy path: correct payload + valid auth → expected status (200/201) + schema validation
+  2. 🔐 Unauthorized: omit token → assert 401
+  3. 🚫 Not found: invalid ID → assert 404 (where semantically applicable)
+  4. ❌ Bad request: malformed/missing required fields → assert 400 + validate error message shape
+
+SCHEMA VALIDATION — use toMatchObject for partial matching:
+  const body = await response.json();
+  expect(body).toMatchObject({ id: expect.any(String), email: expect.stringContaining('@') });
+
+ARRANGE → ACT → ASSERT (AAA) — mandatory in every test block.
+
+STRICT BANS:
+  ✗ page.goto(), getByRole(), getByLabel(), or ANY browser/DOM locator
+  ✗ Hardcoded credentials in source — always use process.env.*
+  ✗ Missing auth headers on protected endpoints
+═══════════════════════════════════════════════
+OUTPUT RULES:
+  - Return ONLY raw TypeScript code.
+  - NO markdown code fences, NO introductory text.
+  - Emit a BASE_URL constant at the top: const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000';`;
+
+// ── Skill 3: Failure RCA (Playwright error + Coralogix logs → structured analysis) ──
+const FAILURE_ANALYSIS_SYSTEM = `\
+You are a Senior DevOps & Observability Engineer specializing in Root Cause Analysis (RCA) \
+for distributed systems. You have deep expertise in Playwright, CI/CD pipelines, Node.js, \
+React, and Coralogix/Datadog observability platforms.
+
+═══════════════════════════════════════════════
+DIAGNOSTIC METHODOLOGY:
+  1. LOCATE the FIRST failure event in the timeline — this is the root cause, not a cascade symptom.
+  2. CROSS-REFERENCE the Playwright stack trace with the Coralogix server logs provided.
+  3. TRACE the failure chain: Frontend action → HTTP request → Backend handler → DB/External service.
+  4. DISTINGUISH: test bug (wrong locator, bad assertion) vs. application bug (500, auth failure, data race).
+  5. NEVER speculate. Base your analysis only on evidence in the logs and stack trace provided.
+═══════════════════════════════════════════════
+MANDATORY OUTPUT — use EXACTLY this 3-section Markdown structure. Never skip a section.
+
+## 🚨 Root Cause (Plain Language)
+[1-2 sentences. Non-technical. What broke, explained to a non-engineer.
+Example: "The checkout button triggered a server request that crashed due to a null cart value,
+so the confirmation page never loaded and the test assertion failed."]
+
+## 🔍 Technical Breakdown
+[2-4 sentences of precise technical detail: which component failed, what error code or
+exception was thrown, and how the failure propagated through the system.
+Example: "The POST /api/checkout request returned HTTP 500 Internal Server Error.
+The Coralogix logs show an UnhandledPromiseRejection in checkout-service at
+cart.service.ts:87 — cart.items was undefined when the validation function attempted
+to iterate over it. The API gateway forwarded the 500 upstream without a fallback,
+causing the React component to render an error boundary instead of the success state."]
+
+## 💡 Actionable Fix
+[Numbered steps. Separate Dev and QA responsibilities where applicable. Minimum 3 steps.
+Example:
+1. **Dev:** Add a null-check guard before cart iteration: \`if (!cart?.items?.length) throw new BadRequestException('Cart is empty');\`
+2. **Dev:** Implement a global exception filter to ensure all 500 responses return a consistent \`{ code, message }\` shape.
+3. **QA:** Add \`await page.waitForResponse(resp => resp.url().includes('/api/checkout') && resp.status() === 200)\` before asserting on the confirmation screen.
+4. **QA (new test case):** Write a test that mocks the checkout API to return 500 using \`page.route()\` and verifies the error state is shown correctly.]
+═══════════════════════════════════════════════
+LANGUAGE: Professional English. If Hebrew appears in the test names or logs, also provide
+the Root Cause sentence in Hebrew directly below the English version.
+Return ONLY the structured Markdown. NEVER output raw JSON. NEVER omit a section.`;
+
+// ─── OpenAI ───────────────────────────────────────────────────────────────────
+
+async function callOpenAI(systemPrompt: string, userPrompt: string, apiKeyOverride?: string): Promise<string> {
+  const { default: OpenAI } = await import("openai");
+  const key = apiKeyOverride || ENV_OPENAI_KEY;
+  const client = new OpenAI({ apiKey: key });
+
+  const response = await client.chat.completions.create({
+    model: OPENAI_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0.2,
+    max_tokens: 3000,
+  });
+
+  return response.choices[0]?.message?.content ?? "";
+}
+
+// ─── Anthropic ────────────────────────────────────────────────────────────────
+
+async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<string> {
+  const Anthropic = await import("@anthropic-ai/sdk");
+  const client = new Anthropic.default({ apiKey: ENV_ANTHROPIC_KEY });
+
+  const response = await client.messages.create({
+    model: ANTHROPIC_MODEL,
+    max_tokens: 3000,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
+  });
+
+  const block = response.content[0];
+  return block.type === "text" ? block.text : "";
+}
+
+// ─── Mock fallback ────────────────────────────────────────────────────────────
+
+function buildMockPlaywrightCode(stories: UserStory[]): string {
+  const firstStory = stories[0];
+  const className = firstStory.title
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .split(" ")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join("")
+    .replace(/\s+/g, "");
+
+  return `// ⚠️  MOCK MODE — Add OPENAI_API_KEY to .env for real AI generation
+// Generated by QA-Genius (Mock) — Page Object Model Pattern
+
+import { Page, Locator, expect } from "@playwright/test";
+import { test } from "@playwright/test";
+
+// ─── Page Object ─────────────────────────────────────────────────────────────
+
+export class ${className}Page {
+  readonly page: Page;
+  readonly heading: Locator;
+  readonly submitButton: Locator;
+  readonly errorMessage: Locator;
+  readonly successBanner: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.heading = page.getByRole("heading", { level: 1 });
+    this.submitButton = page.getByRole("button", { name: /submit|confirm|save/i });
+    this.errorMessage = page.getByRole("alert");
+    this.successBanner = page.getByText(/success|completed|done/i);
+  }
+
+  /** Navigate to the feature under test */
+  async navigate(path = "/") {
+    await this.page.goto(path);
+    await this.page.waitForLoadState("networkidle");
+  }
+
+  /** Fill in a labelled form field */
+  async fillField(label: string, value: string) {
+    await this.page.getByLabel(label).fill(value);
+  }
+
+  /** Submit the primary form */
+  async submit() {
+    await this.submitButton.click();
+  }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+${stories
+  .map(
+    (story, idx) => `
+test.describe("${story.title}", () => {
+  let featurePage: ${className}Page;
+
+  test.beforeEach(async ({ page }) => {
+    featurePage = new ${className}Page(page);
+    await featurePage.navigate();
+  });
+
+  test("TC-${String(idx + 1).padStart(3, "0")}: ${story.steps[0] ?? "renders without errors"}", async ({ page }) => {
+    // Arrange
+    await expect(featurePage.heading).toBeVisible();
+
+    // Act
+    // ${story.steps.slice(1).join(", ")}
+
+    // Assert
+    await expect(page).toHaveTitle(/.+/);
+  });
+
+  test("TC-${String(idx + 2).padStart(3, "0")}: ${story.acceptanceCriteria[0] ?? "meets acceptance criteria"}", async () => {
+    // Arrange — preconditions
+    await featurePage.navigate();
+
+    // Act
+    await featurePage.submit().catch(() => {/* Submit may not be available on this view */});
+
+    // Assert
+    const hasOutcome = await featurePage.successBanner
+      .or(featurePage.errorMessage)
+      .isVisible()
+      .catch(() => false);
+    expect(typeof hasOutcome).toBe("boolean");
+  });
+});`
+  )
+  .join("\n")}
+`;
+}
+
+function buildMockFailureAnalysis(errorOutput: string, logs: McpLog[]): AnalyzeFailureResponse {
+  const hasTimeout = /timeout|timed out/i.test(errorOutput);
+  const has500 = /500|internal server/i.test(errorOutput + logs.map((l) => l.message).join(" "));
+  const hasAuth = /401|403|unauthorized|forbidden/i.test(errorOutput + logs.map((l) => l.message).join(" "));
+  const firstErrorLog = logs.find((l) => l.level === "ERROR");
+  const traceInfo = firstErrorLog?.traceId ? ` (trace: ${firstErrorLog.traceId})` : "";
+
+  // ── Root Cause (plain language, 1-2 sentences) ──────────────────────────────
+  const rootCause = has500
+    ? `The backend service crashed with a 500 Internal Server Error while processing the request triggered by the test${traceInfo}. The frontend never received a successful response, so the expected UI state never appeared.`
+    : hasAuth
+    ? `The request was rejected with an authentication error — the test session token is missing or expired. The protected resource returned 401/403 before the test could reach the expected UI state.`
+    : hasTimeout
+    ? `The UI element the test was waiting for never appeared within the timeout window. The page either loaded too slowly or the element was conditionally rendered and the condition was never met.`
+    : `The test assertion did not match the actual DOM state at the time of evaluation. The expected element or text was absent, hidden, or had a different value than expected.`;
+
+  // ── Technical Breakdown (2-4 sentences, precise) ───────────────────────────
+  const explanation = has500
+    ? `The Playwright test dispatched a request to the backend API which was captured in the Coralogix logs${firstErrorLog ? ` as a ${firstErrorLog.level} event in ${firstErrorLog.service}` : ""}. The server encountered an unhandled exception during request processing, returning HTTP 500 to the frontend. The React component entered an error boundary instead of the success state, making the target locator unreachable. The root exception is visible in the Coralogix log entries below — look for the first ERROR entry in the service stack.`
+    : hasAuth
+    ? `The request reached the API gateway but was rejected at the authentication middleware layer before hitting the business logic. The 401/403 response caused the frontend to redirect to the login page or render an access-denied state, neither of which contains the element the test expected. This is either a missing Authorization header in the test setup, an expired test JWT token, or a missing test user fixture in the test environment.`
+    : hasTimeout
+    ? `The call to \`expect(locator).toBeVisible()\` exhausted its retry budget (default: 5000ms) without the element appearing in the DOM. This typically indicates one of: (a) a slow API response preventing the component from rendering, (b) a feature-flag that hides the element for the test user, or (c) a React state update that depends on a WebSocket event that was never fired. The Coralogix logs may show slow or failed upstream API calls during this window.`
+    : `The assertion \`expect(locator).toBe*()\` evaluated the DOM state at the moment Playwright's auto-wait mechanism gave up. The element either existed but had different content than expected, or a conditional render prevented it from mounting. Check whether the preceding Act step (button click / form submit) actually triggered the expected state change by adding a \`waitForResponse\` assertion before the final expect.`;
+
+  // ── Actionable Fix (numbered, Dev + QA split) ──────────────────────────────
+  const suggestedFix = has500
+    ? `1. **Dev:** Locate the first ERROR entry in the Coralogix logs and fix the unhandled exception in that service handler.\n2. **Dev:** Wrap all async route handlers in try/catch and add a global exception filter for consistent \`{ code, message }\` error shapes.\n3. **Dev:** Add an integration test for the 500 scenario using jest/supertest to catch this in the unit test layer before Playwright.\n4. **QA:** Add \`await page.waitForResponse(resp => resp.url().includes('/api/') && resp.status() === 200)\` before the final assertion to make the test's dependency on the API explicit.\n5. **QA:** Write a negative test case using \`page.route()\` to mock a 500 response and verify the error state renders correctly.`
+    : hasAuth
+    ? `1. **QA:** Verify the test user's credentials are valid in the test environment: check \`process.env.TEST_EMAIL\` and \`process.env.TEST_PASSWORD\` are set and match a live test account.\n2. **QA:** Add a \`storageState\` fixture to reuse an authenticated session: \`test.use({ storageState: 'playwright/.auth/user.json' })\`.\n3. **Dev:** Check the token expiry configuration — if tokens expire in < 1 hour, CI test runs may start with a valid token and hit expiry mid-suite.\n4. **QA:** Add a \`beforeAll\` hook that logs in programmatically and stores the token before any protected-route test runs.`
+    : hasTimeout
+    ? `1. **QA:** Increase the specific locator timeout to confirm it's a timing issue: \`await expect(locator).toBeVisible({ timeout: 15000 })\`. If it passes with a higher timeout, the root cause is latency, not a missing element.\n2. **QA:** Replace \`page.waitForLoadState('networkidle')\` with \`page.waitForResponse(url => url.includes('/api/data'))\` to wait for the specific API call that populates the component.\n3. **Dev:** Check whether the element is behind a feature flag or role-based permission that evaluates to false for the test user.\n4. **QA:** Add \`page.on('response', r => console.log(r.status(), r.url()))\` in a debug run to capture all API calls during the test and identify any slow or failing requests.`
+    : `1. **QA:** Log the actual value at the time of failure: \`console.log(await locator.textContent())\` immediately before the failing \`expect()\` to understand what the DOM actually contained.\n2. **QA:** Confirm the Act step triggered the expected state: add \`await expect(page).toHaveURL(/expected-path/)\` after clicking to verify navigation occurred.\n3. **QA:** Replace exact-match assertions with partial matchers where appropriate: \`toContainText()\` instead of \`toHaveText()\` for dynamic content.\n4. **Dev:** Check if the component renders content asynchronously after mount and ensure the API call that populates it is completed before the assertion evaluates.`;
+
+  return { rootCause, explanation, suggestedFix, logs, isMock: true };
+}
+
+// ─── Mock API test builder ────────────────────────────────────────────────────
+
+function buildMockApiTests(swagger: ParsedSwagger, featureName: string): string {
+  const groupName = featureName || swagger.title;
+  const baseUrl = swagger.baseUrl || "http://localhost:3000";
+
+  const testBlocks = swagger.endpoints.slice(0, 6).map((ep, idx) => {
+    const testName = ep.summary ?? `${ep.method} ${ep.path}`;
+    const varName = `response${idx}`;
+    const bodyArg =
+      ep.method !== "GET" && ep.method !== "DELETE"
+        ? `,\n      data: { /* payload */ }`
+        : "";
+    const expectedStatus = ep.method === "POST" ? 201 : 200;
+
+    return `
+  test("TC-${String(idx + 1).padStart(3, "0")}: ${testName}", async ({ request }) => {
+    // Arrange
+    const ${varName} = await request.${ep.method.toLowerCase()}("${ep.path}"${bodyArg ? `, {\n      headers: { Authorization: \`Bearer \${token}\` }${bodyArg}\n    }` : ""});
+
+    // Assert — Happy path
+    expect(${varName}.status()).toBe(${expectedStatus});
+    const body = await ${varName}.json();
+    expect(body).toBeDefined();
+  });
+
+  test("TC-${String(idx + 1).padStart(3, "0")}b: ${testName} — unauthorized", async ({ request }) => {
+    const ${varName}Unauth = await request.${ep.method.toLowerCase()}("${ep.path}");
+    expect(${varName}Unauth.status()).toBe(401);
+  });`;
+  });
+
+  return `// ⚠️  MOCK MODE — Add OPENAI_API_KEY to .env for real AI generation
+// Generated by QA-Genius (Mock) — Playwright API Integration Tests
+// Source: ${swagger.title} v${swagger.version}
+// Feature: ${groupName}
+
+import { test, expect } from "@playwright/test";
+
+const BASE_URL = process.env.BASE_URL ?? "${baseUrl}";
+
+test.describe("${groupName} — API Integration Tests", () => {
+  let token: string;
+
+  test.beforeAll(async ({ request }) => {
+    // Authenticate and store JWT token for subsequent tests
+    const authResponse = await request.post(\`\${BASE_URL}/auth/login\`, {
+      data: { email: "test@example.com", password: "testpassword" },
+    });
+    if (authResponse.ok()) {
+      const body = await authResponse.json();
+      token = body.access_token ?? body.token ?? "mock-token";
+    } else {
+      token = "mock-token";
+    }
+  });
+${testBlocks.join("\n")}
+});
+`;
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+export async function generateTests(
+  prdText: string,
+  userStories: UserStory[],
+  options: { openaiKey?: string } = {}
+): Promise<GenerateTestsResponse> {
+  const { openaiKey, anthropicKey, isMock } = resolveKeys(options);
+  if (isMock) {
+    await new Promise((r) => setTimeout(r, 1800)); // simulate API latency
+    return {
+      code: buildMockPlaywrightCode(userStories),
+      userStories,
+      model: "mock",
+      isMock: true,
+    };
+  }
+
+  const storiesBlock = userStories
+    .map(
+      (s, i) =>
+        `Story ${i + 1}: ${s.title}\n` +
+        `  Steps: ${s.steps.join(" → ")}\n` +
+        `  Acceptance Criteria: ${s.acceptanceCriteria.join("; ")}`
+    )
+    .join("\n\n");
+
+  const userPrompt = `\
+Generate production-grade Playwright TypeScript UI tests for the feature described below.
+Apply all locator, structure, and naming rules from your system instructions.
+
+═══════════════════════════════════════════════
+## Product Requirements Document (PRD)
+${prdText.slice(0, 3500)}
+
+## Extracted User Stories (${userStories.length} total)
+${storiesBlock}
+═══════════════════════════════════════════════
+Requirements:
+- Create one Page Object class covering the shared UI elements for this feature.
+- Generate one test.describe() block per user story.
+- Apply the AAA pattern (Arrange/Act/Assert) in every test.
+- Use only robust locators (getByRole, getByLabel, getByText, getByTestId).
+- Do NOT use page.waitForTimeout() anywhere.`;
+
+  let code: string;
+  let model: string;
+
+  if (openaiKey) {
+    code = await callOpenAI(TEST_GENERATION_SYSTEM, userPrompt, openaiKey);
+    model = OPENAI_MODEL;
+  } else {
+    code = await callAnthropic(TEST_GENERATION_SYSTEM, userPrompt);
+    model = ANTHROPIC_MODEL;
+  }
+
+  // Strip markdown fences if the model wrapped the code anyway
+  code = code.replace(/^```(?:typescript|ts)?\n?/, "").replace(/\n?```$/, "").trim();
+
+  return { code, userStories, model, isMock: false };
+}
+
+export async function generateApiTests(
+  swagger: ParsedSwagger,
+  featureName: string,
+  options: { openaiKey?: string } = {}
+): Promise<GenerateTestsResponse> {
+  const { openaiKey, isMock } = resolveKeys(options);
+  if (isMock) {
+    await new Promise((r) => setTimeout(r, 1800));
+    return {
+      code: buildMockApiTests(swagger, featureName),
+      userStories: swagger.endpoints.slice(0, 6).map((ep) => ({
+        id: ep.operationId ?? `${ep.method}_${ep.path}`,
+        title: `${ep.method} ${ep.path}`,
+        steps: [ep.summary ?? "Call endpoint", "Validate response status", "Validate response body"],
+        acceptanceCriteria: [`Returns HTTP ${ep.method === "POST" ? 201 : 200}`],
+      })),
+      model: "mock",
+      isMock: true,
+    };
+  }
+
+  const endpointDocs = swagger.endpoints
+    .map((ep) => {
+      const lines = [`${ep.method} ${ep.path}${ep.summary ? ` — "${ep.summary}"` : ""}`];
+      if (ep.parameters?.length)
+        lines.push(`  Params: ${ep.parameters.map((p) => `${p.name} (${p.in}${p.required ? ", required" : ""})`).join(", ")}`);
+      if (ep.requestBodySchema)
+        lines.push(`  Request body schema: ${JSON.stringify(ep.requestBodySchema).slice(0, 250)}`);
+      if (ep.responseSchema)
+        lines.push(`  Success response schema: ${JSON.stringify(ep.responseSchema).slice(0, 250)}`);
+      if (ep.tags?.length)
+        lines.push(`  Tags: ${ep.tags.join(", ")}`);
+      return lines.join("\n");
+    })
+    .join("\n\n");
+
+  const userPrompt = `\
+Generate production-grade Playwright API Integration Tests for the OpenAPI spec below.
+Apply all request context rules and test case requirements from your system instructions.
+
+═══════════════════════════════════════════════
+API Title:    ${swagger.title}
+API Version:  ${swagger.version}
+Base URL:     ${swagger.baseUrl || "process.env.BASE_URL"}
+Feature Name: ${featureName}
+Endpoint Count: ${swagger.endpoints.length}
+
+## Endpoints to Test
+${endpointDocs}
+═══════════════════════════════════════════════
+Requirements:
+- Group tests by resource/tag using test.describe().
+- Implement beforeAll() for authentication token acquisition.
+- Generate: happy path + 401 + 404 (where applicable) + 400 test cases per endpoint.
+- Validate both HTTP status codes AND response body shape.
+- Never use page, browser, or any DOM locator.`;
+
+  let code: string;
+  let model: string;
+
+  if (openaiKey) {
+    code = await callOpenAI(API_TEST_GENERATION_SYSTEM, userPrompt, openaiKey);
+    model = OPENAI_MODEL;
+  } else {
+    code = await callAnthropic(API_TEST_GENERATION_SYSTEM, userPrompt);
+    model = ANTHROPIC_MODEL;
+  }
+
+  code = code.replace(/^```(?:typescript|ts)?\n?/, "").replace(/\n?```$/, "").trim();
+
+  return {
+    code,
+    userStories: swagger.endpoints.slice(0, 6).map((ep) => ({
+      id: ep.operationId ?? `${ep.method}_${ep.path}`,
+      title: `${ep.method} ${ep.path}`,
+      steps: [ep.summary ?? "Call endpoint", "Validate response"],
+      acceptanceCriteria: [`Returns HTTP 200`],
+    })),
+    model,
+    isMock: false,
+  };
+}
+
+export async function analyzeFailure(
+  testCode: string,
+  errorOutput: string,
+  logs: McpLog[],
+  options: { openaiKey?: string } = {}
+): Promise<AnalyzeFailureResponse> {
+  const { openaiKey, isMock } = resolveKeys(options);
+  if (isMock) {
+    await new Promise((r) => setTimeout(r, 2200));
+    return buildMockFailureAnalysis(errorOutput, logs);
+  }
+
+  const logLines = logs
+    .map((l) => {
+      const statusPart = l.statusCode ? ` [HTTP ${l.statusCode}]` : "";
+      const tracePart = l.traceId ? ` trace=${l.traceId}` : "";
+      return `[${l.timestamp}] [${l.level}]${statusPart} ${l.service}${tracePart}: ${l.message}`;
+    })
+    .join("\n");
+
+  const userPrompt = `\
+You are performing a Root Cause Analysis on a Playwright test failure.
+Cross-reference the test code, the error output, and the Coralogix server logs below.
+
+═══════════════════════════════════════════════
+## Playwright Test Code (abbreviated)
+\`\`\`typescript
+${testCode.slice(0, 2000)}
+\`\`\`
+
+## Playwright Failure Output
+\`\`\`
+${errorOutput.slice(0, 1200)}
+\`\`\`
+
+## Coralogix Server Logs (fetched via MCP — ${logs.length} entries)
+\`\`\`
+${logLines || "(no server logs available)"}
+\`\`\`
+═══════════════════════════════════════════════
+Produce the full 3-section RCA using the Markdown structure defined in your instructions.
+Map each finding to specific evidence from the logs and stack trace above.`;
+
+  let raw: string;
+  if (openaiKey) {
+    raw = await callOpenAI(FAILURE_ANALYSIS_SYSTEM, userPrompt, openaiKey);
+  } else {
+    raw = await callAnthropic(FAILURE_ANALYSIS_SYSTEM, userPrompt);
+  }
+
+  // The new system prompt outputs structured Markdown, not JSON.
+  // Parse the 3 sections out of the markdown for the existing frontend fields.
+  const rootCauseMatch = raw.match(/##\s*🚨[^\n]*\n+([\s\S]*?)(?=\n##\s*🔍|$)/);
+  const breakdownMatch = raw.match(/##\s*🔍[^\n]*\n+([\s\S]*?)(?=\n##\s*💡|$)/);
+  const fixMatch = raw.match(/##\s*💡[^\n]*\n+([\s\S]*?)(?=\n##|$)/);
+
+  return {
+    rootCause: rootCauseMatch?.[1]?.trim() ?? raw.split("\n")[0] ?? "See explanation below.",
+    explanation: breakdownMatch?.[1]?.trim() ?? raw,
+    suggestedFix: fixMatch?.[1]?.trim() ?? "Review the error output manually.",
+    logs,
+    isMock: false,
+  };
+}
+
+// ─── Standalone log analysis (Tab 3) ─────────────────────────────────────────
+
+// ── Skill 4: Instant Log Analyzer (any raw log source → structured RCA JSON) ──
+const LOG_ANALYSIS_SYSTEM = `\
+You are a Senior DevOps & Observability Engineer specializing in Root Cause Analysis (RCA). \
+You diagnose failures from raw log output across Playwright, Coralogix, Node.js, Docker, \
+Kubernetes, CI/CD runners, and application error traces.
+
+═══════════════════════════════════════════════
+DIAGNOSTIC METHODOLOGY:
+  1. IDENTIFY the FIRST failure event — the root cause event, not downstream cascade symptoms.
+  2. TRACE the propagation chain from root event to the observed symptom.
+  3. CLASSIFY by severity and category based on the evidence in the logs.
+  4. PROVIDE actionable, developer-ready remediation steps.
+  5. NEVER speculate — cite specific log lines, error codes, or exceptions as evidence.
+
+SEVERITY CLASSIFICATION:
+  critical  — data loss, production outage, security breach, process crash
+  high      — functional failure, blocked user flow, consistent test failure
+  medium    — degraded performance, intermittent failure, flaky test
+  low       — warning noise, cosmetic issue, minor configuration drift
+
+CATEGORY CLASSIFICATION:
+  test-failure  — locator timeout, wrong assertion, missing test-id, env mismatch
+  runtime-error — unhandled exception, null pointer, type error, crash
+  network       — ECONNREFUSED, timeout, DNS, CORS, proxy
+  auth          — 401/403, token expiry, missing credentials, CSRF
+  database      — query failure, connection pool exhausted, migration error
+  timeout       — request/response timeout, long-running job, idle connection
+  config        — missing env var, wrong base URL, misconfigured middleware
+  unknown       — insufficient log data to classify
+═══════════════════════════════════════════════
+OUTPUT — return a single valid JSON object with EXACTLY these keys:
+{
+  "rootCause":    "1-2 sentences, plain non-technical language. What broke and why.",
+  "explanation":  "2-4 sentences, technical precision. Which component, which error code/exception, propagation chain. Cite specific log lines.",
+  "suggestedFix": "Numbered list. Mix Dev + QA remediation. Minimum 3, maximum 6 steps. Reference the specific file, function, or config where the fix should be applied.",
+  "severity":     "critical|high|medium|low",
+  "category":     "test-failure|runtime-error|network|auth|database|timeout|config|unknown"
+}
+
+STRICT OUTPUT RULES:
+  - Return ONLY the raw JSON object.
+  - NO markdown code fences (\`\`\`), NO explanatory text before or after.
+  - All string values must be properly escaped JSON strings.
+  - suggestedFix must be a multi-line string with \\n between steps.`;
+
+const MOCK_LOG_ANALYSES: Record<string, {
+  rootCause: string;
+  explanation: string;
+  suggestedFix: string;
+  severity: string;
+  category: string;
+}> = {
+  playwright: {
+    rootCause:
+      "The Playwright test assertion timed out because the target element was never rendered in the DOM within the 5-second default timeout window.",
+    explanation:
+      "The call to `expect(locator).toBeVisible()` exhausted its full retry budget without finding the element. " +
+      "Analysis of the stack trace shows the locator was `getByText(/success|completed|done/i)`, which depends on " +
+      "the API response populating the component state. The root cause is most likely a slow or failed upstream API " +
+      "call that prevented the React component from completing its render cycle — not a locator bug.",
+    suggestedFix:
+      "1. **QA — Confirm timing:** Increase the assertion timeout temporarily to rule out latency: `await expect(locator).toBeVisible({ timeout: 15000 })`. If it passes, the root cause is a slow API.\n" +
+      "2. **QA — Explicit API wait:** Replace the raw assertion with an explicit response wait: `await page.waitForResponse(resp => resp.url().includes('/api/') && resp.ok())` before the `expect()`.\n" +
+      "3. **QA — Inspect network:** Add `page.on('response', r => console.log(r.status(), r.url()))` to a debug run to identify any failing API calls during the test.\n" +
+      "4. **Dev — Guard render:** Ensure the component renders a loading state and only shows the success element after the Promise resolves — not during the pending state.\n" +
+      "5. **QA — Ban waitForTimeout:** Search the test suite for `page.waitForTimeout()` calls and replace each one with a specific `waitForResponse` or `expect().toBeVisible()` call.",
+    severity: "high",
+    category: "test-failure",
+  },
+  coralogix: {
+    rootCause:
+      "The checkout-service crashed with HTTP 500 because `cart.items` was null when the validation function tried to iterate over it.",
+    explanation:
+      "The Coralogix logs show a critical ERROR event from `checkout-service` at `cart.service.ts:87`: " +
+      "`UnhandledPromiseRejection: Cannot read property 'price' of undefined`. " +
+      "This was triggered because the cart object was fetched from the session store but `cart.items` had not " +
+      "been initialized (null vs. empty array). The API gateway forwarded the raw 500 without a fallback, " +
+      "causing the React checkout component to enter an error boundary. The test assertion on the confirmation " +
+      "page failed because that page was never rendered.",
+    suggestedFix:
+      "1. **Dev — Null guard:** In `cart.service.ts:87`, add: `if (!cart?.items?.length) throw new BadRequestException('Cart is empty or items are missing');`\n" +
+      "2. **Dev — Global error filter:** Implement a NestJS/Express global exception filter to ensure all 500 responses return a consistent `{ statusCode, message, timestamp }` shape.\n" +
+      "3. **Dev — Circuit breaker:** Add retry/circuit-breaker logic in the API gateway for checkout-service — return a graceful 503 with a user-friendly message instead of a raw 500.\n" +
+      "4. **Dev — Coralogix alert:** Create a Coralogix alert rule triggered when checkout-service ERROR count exceeds 5 per minute to catch this before it impacts users.\n" +
+      "5. **QA — Mock negative case:** Add a Playwright test using `page.route('/api/checkout', route => route.fulfill({ status: 500 }))` to verify the error state renders correctly in the UI.",
+    severity: "critical",
+    category: "runtime-error",
+  },
+  nodejs: {
+    rootCause:
+      "The Node.js server process crashed with an `UnhandledPromiseRejection` because a database query was awaited inside an async function that had no try/catch error boundary.",
+    explanation:
+      "The stack trace shows the error originated in a Promise chain at the database layer — likely a connection timeout or pool exhaustion event. " +
+      "In Node.js v15+, unhandled promise rejections terminate the process with exit code 1. " +
+      "The database connection pool was at capacity (maxConnections reached) because long-running queries were not released back to the pool, " +
+      "causing new requests to queue until timeout. The crash brought down the entire Express server instance.",
+    suggestedFix:
+      "1. **Dev — Add error boundaries:** Wrap every async route handler: `router.get('/path', asyncHandler(async (req, res) => { ... }))` using the `express-async-errors` package.\n" +
+      "2. **Dev — Global rejection handler:** Add `process.on('unhandledRejection', (reason, promise) => { logger.error('Unhandled Rejection:', reason); })` in `src/index.ts`.\n" +
+      "3. **Dev — Connection pool tuning:** Review the DB pool config — set `pool.max` to a safe ceiling (e.g., 20) and add `pool.idleTimeoutMillis: 30000` to release idle connections.\n" +
+      "4. **Dev — Query timeout:** Add a per-query timeout: `db.query({ text: sql, values, timeout: 5000 })` to prevent long-running queries from holding pool connections.\n" +
+      "5. **QA — Chaos test:** Write a Playwright test that simulates a 503 from the DB layer using `page.route()` and verifies the UI degrades gracefully with a user-friendly error message.",
+    severity: "critical",
+    category: "runtime-error",
+  },
+  jest: {
+    rootCause:
+      "A Jest test suite failed because an expected value did not match the received value, indicating a contract mismatch between the test expectation and the actual code behavior.",
+    explanation:
+      "The Jest output shows one or more `expect(received).toBe(expected)` failures. " +
+      "This typically means the function under test returned an unexpected value — either due to a logic bug introduced in a recent code change, " +
+      "or because the test expectation was written for an older version of the API. " +
+      "Jest snapshot failures indicate that the component's rendered output changed without the snapshot being intentionally updated.",
+    suggestedFix:
+      "1. **Dev — Read the diff:** Jest prints `- Expected` and `+ Received` — start there. The received value is what the code actually returns today.\n" +
+      "2. **Dev — Check recent changes:** Run `git log --oneline -10` and `git diff HEAD~1` to see if a recent commit changed the function's return value.\n" +
+      "3. **QA — Update snapshots if intentional:** If the UI change was intentional, run `jest --updateSnapshot` and commit the new snapshot.\n" +
+      "4. **Dev — Add a regression test:** Once the bug is fixed, add a test that covers the exact failing input to prevent regressions.\n" +
+      "5. **QA — Run in watch mode:** Use `jest --watch` to re-run the affected test file on every save while debugging.",
+    severity: "high",
+    category: "test-failure",
+  },
+  docker: {
+    rootCause:
+      "A Docker container failed to start or crashed during runtime, preventing the application from serving requests.",
+    explanation:
+      "The Docker logs show either a container exit with a non-zero exit code or an OOMKilled event. " +
+      "Common causes include: missing environment variables that the entrypoint script requires, " +
+      "a port binding conflict (address already in use), a base image compatibility issue, " +
+      "or the application process crashing due to an unhandled exception at startup. " +
+      "An OOMKilled event means the container exceeded its memory limit and was forcibly terminated by the kernel.",
+    suggestedFix:
+      "1. **Dev — Check exit code:** Run `docker ps -a` to see the container's last exit code. Exit 1 = app error, Exit 137 = OOMKilled, Exit 126/127 = command not found.\n" +
+      "2. **Dev — Inspect full logs:** Run `docker logs <container_id> --tail 100` to see the full startup sequence and the last error before exit.\n" +
+      "3. **Dev — Verify env vars:** Check that all required environment variables are present: `docker inspect <container_id> | grep Env`.\n" +
+      "4. **Dev — Fix OOM:** If OOMKilled, increase the container memory limit in `docker-compose.yml`: `mem_limit: 512m` → `1g`. Profile memory usage with `docker stats`.\n" +
+      "5. **QA — Test locally first:** Run `docker run --rm -it <image> sh` to get an interactive shell inside the image and manually run the entrypoint command to see the raw error.",
+    severity: "critical",
+    category: "runtime-error",
+  },
+  unknown: {
+    rootCause:
+      "The logs contain error-level events indicating a system failure, but there is insufficient context to pinpoint the exact root component.",
+    explanation:
+      "The provided log output contains one or more ERROR or WARN entries without a clear originating service, stack trace, or error code. " +
+      "The most common causes for ambiguous log patterns are: (a) missing structured logging (plain text instead of JSON), " +
+      "(b) logs truncated before the originating exception appears, or (c) a configuration error that silently fails at startup. " +
+      "Without a full stack trace or correlated trace ID, the exact failure point cannot be determined from this output alone.",
+    suggestedFix:
+      "1. **Dev — Enable structured logging:** Replace `console.log(error)` with a structured logger (Winston/Pino): `logger.error({ err: error, context: 'ServiceName' }, 'Operation failed')` to get JSON logs with stack traces.\n" +
+      "2. **QA — Identify the first ERROR:** Scroll to the earliest timestamp in the log — the root cause event is almost always the first ERROR, not the last one (which is usually a cascade symptom).\n" +
+      "3. **Dev — Add correlation IDs:** Implement a request-scoped trace ID (e.g., using `cls-hooked` or OpenTelemetry) and include it in every log line to correlate events across services.\n" +
+      "4. **QA — Reproduce in isolation:** Run the failing test in isolation (`playwright test --grep 'test name'`) with verbose logging (`DEBUG=pw:api`) to capture the exact Playwright call that preceded the failure.\n" +
+      "5. **Dev — Check recent deployments:** Cross-reference the log timestamps with recent git commits or deployment events — most production failures correlate with a config change or code deployment within the previous 2 hours.",
+    severity: "medium",
+    category: "unknown",
+  },
+};
+
+export interface RawLogAnalysisResponse {
+  rootCause: string;
+  explanation: string;
+  suggestedFix: string;
+  severity: string;
+  category: string;
+  isMock: boolean;
+}
+
+export async function analyzeRawLogs(
+  rawLogs: string,
+  source: string,
+  options: { openaiKey?: string } = {}
+): Promise<RawLogAnalysisResponse> {
+  const { openaiKey, isMock } = resolveKeys(options);
+  if (isMock) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const src = source.toLowerCase();
+    const key = src.includes("playwright")
+      ? "playwright"
+      : src.includes("coralogix")
+      ? "coralogix"
+      : src.includes("node")
+      ? "nodejs"
+      : src.includes("jest")
+      ? "jest"
+      : src.includes("docker")
+      ? "docker"
+      : "unknown";
+    return { ...MOCK_LOG_ANALYSES[key], isMock: true };
+  }
+
+  const userPrompt = `\
+Perform a Root Cause Analysis on the following log output.
+
+Log Source: ${source}
+Log Length: ${rawLogs.length} characters
+Timestamp of Analysis: ${new Date().toISOString()}
+
+═══════════════════════════════════════════════
+## Raw Log / Error Output
+\`\`\`
+${rawLogs.slice(0, 4000)}
+\`\`\`
+═══════════════════════════════════════════════
+Instructions:
+1. Identify the FIRST failure event in the log as the root cause.
+2. Trace the propagation chain to explain how it cascaded.
+3. Classify severity and category based on the evidence above.
+4. Return ONLY the JSON object defined in your system instructions — no extra text.`;
+
+  let raw: string;
+  if (openaiKey) {
+    raw = await callOpenAI(LOG_ANALYSIS_SYSTEM, userPrompt, openaiKey);
+  } else {
+    raw = await callAnthropic(LOG_ANALYSIS_SYSTEM, userPrompt);
+  }
+
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    return { ...JSON.parse(jsonMatch?.[0] ?? raw), isMock: false };
+  } catch {
+    return {
+      rootCause: "Unable to parse AI response",
+      explanation: raw.slice(0, 800),
+      suggestedFix: "Review the logs manually.",
+      severity: "unknown",
+      category: "unknown",
+      isMock: false,
+    };
+  }
+}
