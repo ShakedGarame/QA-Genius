@@ -46,7 +46,8 @@ router.post("/api/auth/mock-login", async (req: Request, res: Response) => {
         user: { id: guestUser.id, name: guestUser.name, email: guestUser.email },
       });
     });
-  } catch {
+  } catch (err) {
+    console.error("[mock-login]", err);
     res.status(500).json({ error: "Login failed" });
   }
 });
