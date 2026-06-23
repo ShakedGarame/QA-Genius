@@ -15,5 +15,5 @@ playwright-report/
 tests/generated/
 
 # Database & session store (user data — never commit)
-data/
+/data/
 .vercel
