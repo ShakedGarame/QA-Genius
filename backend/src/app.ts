@@ -33,8 +33,10 @@ const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL
 // ─── Session store (PostgreSQL — works on Vercel) ─────────────────────────────
 
 const PgSession = connectPgSimple(session);
+// Sessions need session-mode pooler (5432); Prisma uses transaction pooler (6543) via DATABASE_URL.
+const sessionConnectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: sessionConnectionString,
   ssl: isProduction ? { rejectUnauthorized: false } : undefined,
 });
 
