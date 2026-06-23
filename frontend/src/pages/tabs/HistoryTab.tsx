@@ -433,6 +433,15 @@ export default function HistoryTab() {
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { refreshLogs(); }, [refreshLogs]);
 
+  useEffect(() => {
+    const onChanged = () => {
+      refresh();
+      refreshLogs();
+    };
+    window.addEventListener("qa-genius:repository-changed", onChanged);
+    return () => window.removeEventListener("qa-genius:repository-changed", onChanged);
+  }, [refresh, refreshLogs]);
+
   const showMockData = !isLoading && !error && realFeatures.length === 0;
   const features: FeatureGroup[] = showMockData ? MOCK_FEATURES : realFeatures;
 

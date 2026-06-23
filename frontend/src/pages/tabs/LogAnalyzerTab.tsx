@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { RawLogAnalysisResponse } from "../../types";
+import { buildOpenAIKeyHeaders } from "../../lib/apiKeys";
 
 const LOG_SOURCES = [
   { value: "playwright", label: "Playwright Test Failure", icon: "🎭", placeholder: `Error: Timed out 5000ms waiting for expect(locator).toBeVisible()
@@ -77,7 +78,7 @@ export default function LogAnalyzerTab() {
     try {
       const res = await fetch("/api/analyze-logs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...buildOpenAIKeyHeaders() },
         credentials: "include",
         body: JSON.stringify({ rawLogs, source }),
       });
@@ -108,6 +109,7 @@ export default function LogAnalyzerTab() {
               setStatusMessage(data.message ?? "");
             } else if (eventType === "result") {
               setResult(data as RawLogAnalysisResponse);
+              window.dispatchEvent(new CustomEvent("qa-genius:repository-changed"));
             } else if (eventType === "error") {
               setError(data.message ?? "Analysis failed");
             }

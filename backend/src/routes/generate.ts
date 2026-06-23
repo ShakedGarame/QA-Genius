@@ -6,6 +6,7 @@ import { parseRawText, parseFileBuffer, parseSwaggerBuffer, parseSwaggerText } f
 import { GenerateTestsRequest, FeatureMeta } from "../types/index.js";
 import { getUserSettings, saveGeneratedTest, upsertFeatureMeta } from "../db.js";
 import type { DbUser } from "../db.js";
+import { extractOpenAIKeyFromRequest } from "../lib/requestKeys.js";
 
 const router = Router();
 
@@ -66,7 +67,8 @@ router.post(
     }
 
     const userSettings = await getUserSettings(userId);
-    const llmOptions = { openaiKey: userSettings?.openai_api_key ?? undefined };
+    const openaiKey = extractOpenAIKeyFromRequest(req, userSettings);
+    const llmOptions = { openaiKey };
 
     try {
       if (inputType === "swagger") {

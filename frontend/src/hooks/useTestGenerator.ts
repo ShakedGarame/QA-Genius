@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ParsedPrd, GenerateTestsResult } from "../types";
+import { buildOpenAIKeyHeaders } from "../lib/apiKeys";
 
 export interface GenerateResult extends GenerateTestsResult {
   savedAs?: string;
@@ -17,7 +18,8 @@ export function useTestGenerator() {
     try {
       const res = await fetch("/api/generate-tests", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...buildOpenAIKeyHeaders() },
+        credentials: "include",
         body: JSON.stringify({ prdText: prd.rawText, fileName: prd.fileName }),
       });
 

@@ -11,6 +11,7 @@ import TestEditor from "../../components/qa-genius/TestEditor";
 import ExecutionConsole from "../../components/qa-genius/ExecutionConsole";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 import { useTestRunner } from "../../hooks/useTestRunner";
+import { buildOpenAIKeyHeaders } from "../../lib/apiKeys";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
 
 // ─── Feature Name Input ───────────────────────────────────────────────────────
@@ -382,7 +383,12 @@ export default function TestGeneratorTab() {
         return;
       }
 
-      const res = await fetch("/api/generate-tests", { method: "POST", body: formData });
+      const res = await fetch("/api/generate-tests", {
+        method: "POST",
+        credentials: "include",
+        headers: buildOpenAIKeyHeaders(),
+        body: formData,
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Generation failed");
 
@@ -402,6 +408,7 @@ export default function TestGeneratorTab() {
       }
 
       setStage("generated");
+      window.dispatchEvent(new CustomEvent("qa-genius:repository-changed"));
     } catch (e) {
       setGenError(e instanceof Error ? e.message : "Generation failed");
     } finally {

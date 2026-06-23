@@ -162,13 +162,14 @@ router.put("/api/me/settings", async (req: Request, res: Response) => {
     tests_output_dir,
   } = req.body as Record<string, string | undefined>;
 
+  // Only update keys explicitly sent by the client — omitting a field must not wipe stored secrets.
   await upsertUserSettings(user.id, {
-    openai: openai_api_key?.trim() || null,
-    anthropic: anthropic_api_key?.trim() || null,
-    coralogix: coralogix_api_key?.trim() || null,
-    coralogixTeamName: coralogix_team_name?.trim() || null,
-    coralogixRegion: coralogix_region?.trim() || null,
-    testsOutputDir: tests_output_dir?.trim() || null,
+    ...(openai_api_key !== undefined ? { openai: openai_api_key?.trim() || null } : {}),
+    ...(anthropic_api_key !== undefined ? { anthropic: anthropic_api_key?.trim() || null } : {}),
+    ...(coralogix_api_key !== undefined ? { coralogix: coralogix_api_key?.trim() || null } : {}),
+    ...(coralogix_team_name !== undefined ? { coralogixTeamName: coralogix_team_name?.trim() || null } : {}),
+    ...(coralogix_region !== undefined ? { coralogixRegion: coralogix_region?.trim() || null } : {}),
+    ...(tests_output_dir !== undefined ? { testsOutputDir: tests_output_dir?.trim() || null } : {}),
   });
 
   res.json({ success: true });

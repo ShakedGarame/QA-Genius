@@ -12,6 +12,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import clsx from "clsx";
+import { setStoredOpenAIKey } from "../../lib/apiKeys";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -183,7 +184,10 @@ export default function SettingsTab() {
     try {
       const body: Record<string, string> = {};
       // Only send keys that have changed (don't overwrite with masked placeholder)
-      if (!openaiKey.includes("•")) body.openai_api_key = openaiKey;
+      if (!openaiKey.includes("•")) {
+        body.openai_api_key = openaiKey;
+        setStoredOpenAIKey(openaiKey.trim() || null);
+      }
       if (!anthropicKey.includes("•")) body.anthropic_api_key = anthropicKey;
       if (!coralogixKey.includes("•")) body.coralogix_api_key = coralogixKey;
       body.coralogix_team_name = coralogixTeam;

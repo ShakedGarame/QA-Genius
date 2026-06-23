@@ -5,6 +5,7 @@ import { mcpQueryLogs, mcpGetErrorTraces, AVAILABLE_TOOLS } from "../mcp/coralog
 import { AnalyzeFailureRequest } from "../types/index.js";
 import { getUserSettings, saveLogAnalysis, type DbUserSettings } from "../db.js";
 import type { DbUser } from "../db.js";
+import { extractOpenAIKeyFromRequest } from "../lib/requestKeys.js";
 
 const router = Router();
 
@@ -117,7 +118,7 @@ router.post("/analyze-failure", async (req: Request, res: Response) => {
   const userId = (req.user as DbUser).id;
   const userSettings = await getUserSettings(userId);
   const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings);
-  const llmOptions = { openaiKey: userSettings?.openai_api_key ?? undefined };
+  const llmOptions = { openaiKey: extractOpenAIKeyFromRequest(req, userSettings) };
 
   const { testCode, errorOutput } = req.body as AnalyzeFailureRequest;
 
@@ -231,7 +232,7 @@ router.post("/analyze-logs", async (req: Request, res: Response) => {
   const userId = (req.user as DbUser).id;
   const userSettings = await getUserSettings(userId);
   const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings);
-  const llmOptions = { openaiKey: userSettings?.openai_api_key ?? undefined };
+  const llmOptions = { openaiKey: extractOpenAIKeyFromRequest(req, userSettings) };
 
   const { rawLogs, source } = req.body as AnalyzeLogsRequest;
 

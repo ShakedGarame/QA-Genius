@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { RunTestResult, FailureAnalysis, McpStep } from "../types";
+import { buildOpenAIKeyHeaders } from "../lib/apiKeys";
 
 export function useTestRunner() {
   const [isRunning, setIsRunning] = useState(false);
@@ -24,6 +25,7 @@ export function useTestRunner() {
       const res = await fetch("/api/run-test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ code }),
       });
 
@@ -83,7 +85,8 @@ export function useTestRunner() {
     try {
       const res = await fetch("/api/analyze-failure", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...buildOpenAIKeyHeaders() },
+        credentials: "include",
         body: JSON.stringify({ testCode, errorOutput }),
       });
 
