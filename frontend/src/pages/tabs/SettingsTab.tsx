@@ -10,9 +10,16 @@ import {
   FolderOpen,
   Wifi,
   WifiOff,
+  Github,
 } from "lucide-react";
 import clsx from "clsx";
 import { getStoredOpenAIKey, setStoredOpenAIKey, syncOpenAIKeyToStorage, isRealOpenAIKey } from "../../lib/apiKeys";
+import {
+  getStoredGitHubToken,
+  setStoredGitHubToken,
+  syncGitHubTokenToStorage,
+  isRealGitHubToken,
+} from "../../lib/githubToken";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -144,6 +151,7 @@ export default function SettingsTab() {
 
   // Local form state — initialize from localStorage so refresh keeps the key visible.
   const [openaiKey, setOpenaiKey] = useState(() => getStoredOpenAIKey() ?? "");
+  const [githubToken, setGithubToken] = useState(() => getStoredGitHubToken() ?? "");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [coralogixKey, setCoralogixKey] = useState("");
   const [coralogixTeam, setCoralogixTeam] = useState("");
@@ -160,6 +168,11 @@ export default function SettingsTab() {
     syncOpenAIKeyToStorage(value);
   };
 
+  const handleGitHubTokenChange = (value: string) => {
+    setGithubToken(value);
+    syncGitHubTokenToStorage(value);
+  };
+
   const loadSettings = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -174,12 +187,14 @@ export default function SettingsTab() {
       if (storedOpenAI) {
         setOpenaiKey(storedOpenAI);
       } else if (settings.openai_api_key?.includes("•")) {
-        // Server has a saved key but this browser does not — keep field empty, ask user to paste again.
         setOpenaiKey("");
       } else if (settings.openai_api_key) {
         setOpenaiKey(settings.openai_api_key);
         syncOpenAIKeyToStorage(settings.openai_api_key);
       }
+
+      const storedGitHub = getStoredGitHubToken();
+      if (storedGitHub) setGithubToken(storedGitHub);
       setAnthropicKey(settings.anthropic_api_key ?? "");
       setCoralogixKey(settings.coralogix_api_key ?? "");
       setCoralogixTeam(settings.coralogix_team_name ?? "");
@@ -226,7 +241,9 @@ export default function SettingsTab() {
       // Keep the full key visible from localStorage — do not replace with masked server value.
       const storedAfterSave = getStoredOpenAIKey();
       if (storedAfterSave) setOpenaiKey(storedAfterSave);
-      else await loadSettings();
+      const storedGitHubAfterSave = getStoredGitHubToken();
+      if (storedGitHubAfterSave) setGithubToken(storedGitHubAfterSave);
+      if (!storedAfterSave && !storedGitHubAfterSave) await loadSettings();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -257,6 +274,7 @@ export default function SettingsTab() {
   // Derived state
   const storedOpenAI = getStoredOpenAIKey();
   const hasRealOpenAIKey = isRealOpenAIKey(storedOpenAI) || isRealOpenAIKey(openaiKey);
+  const hasRealGitHubToken = isRealGitHubToken(getStoredGitHubToken()) || isRealGitHubToken(githubToken);
   const aiActive = !!(data?.env_has_openai || data?.env_has_anthropic || hasRealOpenAIKey);
   const hasUserOpenAI = hasRealOpenAIKey;
   const coralogixActive = !!(data?.env_has_coralogix || coralogixKey);
@@ -340,6 +358,34 @@ export default function SettingsTab() {
             placeholder="sk-ant-…"
             hint="Fallback AI provider used when no OpenAI key is available."
           />
+        </Section>
+
+        {/* ── Cloud Test Runner (GitHub Actions) ─────────────────────────────── */}
+        <Section
+          icon={Github}
+          title="Cloud Test Runner"
+          badge={
+            <StatusBadge
+              active={hasRealGitHubToken}
+              activeLabel="GitHub Actions Ready"
+              inactiveLabel="Local / Demo Only"
+            />
+          }
+        >
+          <SecretInput
+            id="github-token"
+            label="GitHub Personal Access Token"
+            value={githubToken}
+            onChange={handleGitHubTokenChange}
+            placeholder="ghp_… or github_pat_…"
+            hint="Required on Vercel to trigger real Playwright runs via GitHub Actions. Needs repo scope. Saved automatically in this browser."
+          />
+          {hasRealGitHubToken && (
+            <p className="text-[11px] text-sky-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Run Test will dispatch workflow <code className="font-mono">trigger-playwright-test</code> on ShakedGarame/QA-Genius.
+            </p>
+          )}
         </Section>
 
         {/* ── 2. Observability / Coralogix ──────────────────────────────────── */}

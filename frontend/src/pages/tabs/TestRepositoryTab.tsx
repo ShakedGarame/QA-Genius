@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
 import { FeatureGroup, RunTestResult, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
+import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, requireGitHubTokenForCloudRun } from "../../lib/cloudRunner";
 
 function formatBytes(b: number) {
   return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
@@ -283,7 +284,10 @@ export default function TestRepositoryTab() {
     setLiveStatus("Initializing…");
 
     try {
-      if (isMock) {
+      const githubToken = requireGitHubTokenForCloudRun();
+      const cloudCode = isMock ? MOCK_CODE_MAP[file.relativePath] : undefined;
+
+      if (isMock && !githubToken) {
         const result = await simulateMockRun(
           file,
           (msg, progress) => { setLiveStatus(msg); setLiveProgress(progress); },
@@ -294,45 +298,47 @@ export default function TestRepositoryTab() {
         return;
       }
 
+      if (!githubToken) {
+        setLiveOutput("Error: Add a GitHub PAT in Settings → Cloud Test Runner to execute tests in the cloud.");
+        return;
+      }
+
       const res = await fetch("/api/run-test", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildRunTestHeaders(),
         credentials: "include",
-        body: JSON.stringify({ relativePath: file.relativePath }),
+        body: JSON.stringify({
+          relativePath: file.relativePath,
+          ...(cloudCode ? { code: cloudCode } : {}),
+        }),
       });
 
-      if (!res.body) throw new Error("No response body");
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      let workflowRunId: number | undefined;
+      let gotResult = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      await consumeRunTestStream(res, {
+        onStatus: (msg, progress) => { setLiveStatus(msg); setLiveProgress(progress); },
+        onOutput: (chunk) => setLiveOutput((p) => p + chunk),
+        onResult: (data) => {
+          gotResult = true;
+          setFileResults((p) => ({ ...p, [file.relativePath]: data }));
+          setLiveOutput(data.output ?? "");
+          setLiveProgress(100);
+        },
+        onWorkflowRunId: (id) => { workflowRunId = id; },
+      });
 
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-
-        for (const chunk of events) {
-          const lines = chunk.split("\n");
-          const eventType = lines.find((l) => l.startsWith("event:"))?.replace("event: ", "");
-          const dataLine = lines.find((l) => l.startsWith("data:"))?.replace("data: ", "");
-          if (!eventType || !dataLine) continue;
-
-          try {
-            const data = JSON.parse(dataLine);
-            if (eventType === "status") {
-              setLiveStatus(data.message ?? "");
-              setLiveProgress(data.progress ?? 0);
-            } else if (eventType === "output") {
-              setLiveOutput((p) => p + (data.text ?? ""));
-            } else if (eventType === "result") {
-              setFileResults((p) => ({ ...p, [file.relativePath]: data as RunTestResult }));
-              setLiveOutput(data.output ?? "");
-              setLiveProgress(100);
-            }
-          } catch { /**/ }
+      if (workflowRunId && !gotResult) {
+        setLiveStatus("⏳ Cloud run still in progress — fetching latest status…");
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const status = await pollCloudRunStatus(workflowRunId);
+          setLiveOutput(status.output);
+          if (status.status === "passed" || status.status === "failed") {
+            setFileResults((p) => ({ ...p, [file.relativePath]: status }));
+            setLiveProgress(100);
+            break;
+          }
         }
       }
     } catch (e) {

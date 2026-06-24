@@ -6,6 +6,13 @@ import { spawn } from "child_process";
 import { v4 as uuidv4 } from "uuid";
 import { getGeneratedTestCode } from "../db.js";
 import type { DbUser } from "../db.js";
+import { extractGitHubTokenFromRequest } from "../lib/githubToken.js";
+import {
+  findDispatchRun,
+  resolveCloudRunStatus,
+  triggerPlaywrightWorkflow,
+  waitForWorkflowCompletion,
+} from "../services/githubActions.js";
 
 const router = Router();
 
@@ -18,34 +25,174 @@ interface RunTestRequest {
   featureSlug?: string;
   relativePath?: string;
   testId?: string;
+  baseUrl?: string;
 }
 
 function sendSSE(res: Response, event: string, data: unknown) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function buildVercelMockResult(id: string) {
-  return {
-    testId: id,
-    status: "passed" as const,
-    output:
-      "\n⚠️  Playwright test execution is disabled on Vercel (serverless environment).\n" +
-      "   Tests are saved to your cloud database and can be run locally with `npm run dev`.\n\n" +
-      "Running 2 tests using 1 worker (simulated)\n" +
-      "  ✓  TC-001: renders without errors (1.2s)\n" +
-      "  ✓  TC-002: meets acceptance criteria (0.9s)\n\n" +
-      "  2 passed (2.5s) [mock]\n",
-    duration: 2500,
-    exitCode: 0,
-    mockReason: "vercel_serverless",
-  };
+async function resolveSpecCode(
+  userId: string,
+  body: RunTestRequest
+): Promise<{ code: string; relativePath: string } | { error: string }> {
+  const { code, fileName, featureSlug, relativePath } = body;
+
+  if (code?.trim()) {
+    const rel = relativePath ?? `cloud_runs/${fileName ?? `run_${Date.now()}.spec.ts`}`;
+    if (rel.includes("..")) return { error: "Invalid path" };
+    return { code, relativePath: rel };
+  }
+
+  if (relativePath || (fileName && featureSlug)) {
+    const rel = relativePath ?? `${featureSlug}/${fileName}`;
+    if (rel.includes("..")) return { error: "Invalid path" };
+
+    const parts = rel.split("/");
+    const slug = parts[0];
+    const fname = parts.slice(1).join("/");
+    const dbCode = await getGeneratedTestCode(userId, slug, fname);
+    if (!dbCode) return { error: `File not found: ${rel}` };
+    return { code: dbCode, relativePath: rel };
+  }
+
+  return { error: "Either 'code', 'fileName'+'featureSlug', or 'relativePath' is required" };
 }
+
+async function runViaGitHubActions(
+  req: Request,
+  res: Response,
+  userId: string,
+  body: RunTestRequest,
+  id: string
+): Promise<void> {
+  const githubToken = extractGitHubTokenFromRequest(req);
+  if (!githubToken) {
+    sendSSE(res, "error", {
+      message:
+        "GitHub token missing. Open Settings → Cloud Test Runner, paste a GitHub PAT (repo scope), then try again.",
+    });
+    res.end();
+    return;
+  }
+
+  const resolved = await resolveSpecCode(userId, body);
+  if ("error" in resolved) {
+    sendSSE(res, "error", { message: resolved.error });
+    res.end();
+    return;
+  }
+
+  const { code, relativePath } = resolved;
+  const testCodeB64 = Buffer.from(code, "utf8").toString("base64");
+  const dispatchedAt = Date.now();
+
+  sendSSE(res, "status", {
+    message: "🤖 Triggering cloud runner on GitHub Actions…",
+    progress: 10,
+  });
+  sendSSE(res, "output", { text: "🤖 Triggering cloud runner on GitHub Actions…\n" });
+
+  try {
+    await triggerPlaywrightWorkflow(githubToken, {
+      runId: id,
+      relativePath,
+      testCodeB64,
+      baseUrl: body.baseUrl,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to trigger GitHub Actions";
+    sendSSE(res, "error", { message });
+    res.end();
+    return;
+  }
+
+  sendSSE(res, "status", {
+    message: "🚀 Waiting for GitHub workflow to start…",
+    progress: 20,
+  });
+  sendSSE(res, "output", { text: "🚀 Installing browsers in the cloud…\n" });
+
+  let workflowRunId: number | null = null;
+  for (let i = 0; i < 20; i++) {
+    const run = await findDispatchRun(githubToken, dispatchedAt);
+    if (run) {
+      workflowRunId = run.id;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+
+  if (!workflowRunId) {
+    sendSSE(res, "pending", {
+      message: "Workflow triggered but run ID not found yet. Poll cloud status shortly.",
+      runId: id,
+    });
+    sendSSE(res, "done", { message: "Dispatch sent" });
+    res.end();
+    return;
+  }
+
+  sendSSE(res, "dispatched", { workflowRunId, runId: id });
+  sendSSE(res, "output", { text: `🔗 GitHub run: #${workflowRunId}\n` });
+
+  const startedAt = Date.now();
+  const result = await waitForWorkflowCompletion(
+    githubToken,
+    workflowRunId,
+    startedAt,
+    (message, progress) => {
+      sendSSE(res, "status", { message, progress });
+      sendSSE(res, "output", { text: `${message}\n` });
+    }
+  );
+
+  sendSSE(res, "result", {
+    testId: id,
+    status: result.passed ? "passed" : "failed",
+    output: result.output,
+    duration: result.durationMs,
+    exitCode: result.passed ? 0 : 1,
+    errorDetails: result.passed ? undefined : result.output.slice(0, 800),
+    cloudRunId: workflowRunId,
+    htmlUrl: result.htmlUrl,
+    runner: "github-actions",
+  });
+
+  sendSSE(res, "done", { message: "Cloud execution complete" });
+  res.end();
+}
+
+router.get("/run-test/cloud-status/:runId", async (req: Request, res: Response) => {
+  const githubToken = extractGitHubTokenFromRequest(req);
+  if (!githubToken) {
+    return res.status(401).json({ error: "GitHub token required in x-user-github-token header" });
+  }
+
+  const runId = Number(req.params.runId);
+  if (!Number.isFinite(runId)) {
+    return res.status(400).json({ error: "Invalid run id" });
+  }
+
+  try {
+    const status = await resolveCloudRunStatus(githubToken, runId);
+    return res.json({
+      success: true,
+      ...status,
+      status: status.status,
+      passed: status.passed,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch cloud status";
+    return res.status(500).json({ error: message });
+  }
+});
 
 router.post("/run-test", async (req: Request, res: Response) => {
   const userId = (req.user as DbUser).id;
-  const { code, fileName, featureSlug, relativePath, testId } = req.body as RunTestRequest;
+  const body = req.body as RunTestRequest;
 
-  if (!code && !fileName && !relativePath) {
+  if (!body.code && !body.fileName && !body.relativePath) {
     return res.status(400).json({ error: "Either 'code', 'fileName'+'featureSlug', or 'relativePath' is required" });
   }
 
@@ -54,46 +201,24 @@ router.post("/run-test", async (req: Request, res: Response) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
 
-  const id = testId ?? uuidv4();
+  const id = body.testId ?? uuidv4();
 
   if (isVercel) {
-    sendSSE(res, "status", {
-      message: "☁️ Vercel production — running simulated test result (Playwright disabled in cloud)",
-      progress: 50,
-    });
-    await new Promise((r) => setTimeout(r, 600));
-    sendSSE(res, "result", buildVercelMockResult(id));
-    sendSSE(res, "done", { message: "Mock execution complete" });
-    return res.end();
+    await runViaGitHubActions(req, res, userId, body, id);
+    return;
   }
 
   try {
-    let specCode = code ?? "";
+    let specCode = body.code ?? "";
     let isTempFile = false;
     let specPath = "";
 
-    if (relativePath || (fileName && featureSlug)) {
-      const rel = relativePath ?? `${featureSlug}/${fileName}`;
-      if (rel.includes("..")) {
-        sendSSE(res, "error", { message: "Invalid path" });
-        return res.end();
-      }
-
-      const parts = rel.split("/");
-      const slug = parts[0];
-      const fname = parts.slice(1).join("/");
-      const dbCode = await getGeneratedTestCode(userId, slug, fname);
-      if (!dbCode) {
-        sendSSE(res, "error", { message: `File not found: ${rel}` });
-        return res.end();
-      }
-      specCode = dbCode;
-    }
-
-    if (!specCode) {
-      sendSSE(res, "error", { message: "No test code available to run" });
+    const resolved = await resolveSpecCode(userId, body);
+    if ("error" in resolved) {
+      sendSSE(res, "error", { message: resolved.error });
       return res.end();
     }
+    specCode = resolved.code;
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "qa-genius-run-"));
     specPath = path.join(tmpDir, `run_${id}.spec.ts`);
@@ -163,6 +288,7 @@ router.post("/run-test", async (req: Request, res: Response) => {
         duration,
         errorDetails,
         exitCode,
+        runner: "local",
       });
 
       sendSSE(res, "done", { message: "Execution complete" });
@@ -194,11 +320,11 @@ function extractErrorSummary(output: string): string {
   return relevant.slice(0, 10).join("\n") || output.slice(0, 500);
 }
 
-function buildMockResult(id: string, code: string, elapsed: number) {
+function buildMockResult(id: string, _code: string, elapsed: number) {
   const shouldPass = Math.random() < 0.4;
   const output = shouldPass
     ? `\nRunning 2 tests using 1 worker\n  ✓  TC-001: renders without errors (1.2s)\n  ✓  TC-002: meets acceptance criteria (0.9s)\n\n  2 passed (2.5s)\n`
-    : `\nRunning 2 tests using 1 worker\n  ✓  TC-001: renders without errors (1.1s)\n  ✗  TC-002: meets acceptance criteria (5.0s)\n\n  1) TC-002 ─────────────────────────────\n\n    Error: Timed out 5000ms waiting for expect(locator).toBeVisible()\n\n    Call log:\n      - waiting for getByText(/success|completed|done/i)\n\n  1 failed (6.2s)\n`;
+    : `\nRunning 2 tests using 1 worker\n  ✓  TC-001: renders without errors (1.1s)\n  ✗  TC-002: meets acceptance criteria (5.0s)\n\n  1) TC-002 ─────────────────────────────\n\n    Error: Timed out 5000ms waiting for expect(locator).toBeVisible()\n\n  1 failed (6.2s)\n`;
 
   return {
     testId: id,
@@ -208,7 +334,7 @@ function buildMockResult(id: string, code: string, elapsed: number) {
     exitCode: shouldPass ? 0 : 1,
     errorDetails: shouldPass
       ? undefined
-      : `Error: Timed out 5000ms waiting for expect(locator).toBeVisible()\n\n⚠  Mock mode — Playwright binary not installed at project root.\nRun: npx playwright install chromium`,
+      : `Error: Timed out 5000ms waiting for expect(locator).toBeVisible()`,
   };
 }
 

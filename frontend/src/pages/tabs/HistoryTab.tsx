@@ -10,6 +10,7 @@ import { useTestRepository } from "../../hooks/useTestRepository";
 import { useLogHistory } from "../../hooks/useLogHistory";
 import { FeatureGroup, LogAnalysisRecord, RunTestResult, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
+import { buildRunTestHeaders, consumeRunTestStream } from "../../lib/cloudRunner";
 
 type HistoryView = "tests" | "logs";
 
@@ -46,39 +47,18 @@ function useInlineRunner() {
     try {
       const res = await fetch("/api/run-test", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildRunTestHeaders(),
         credentials: "include",
         body: JSON.stringify({ relativePath: file.relativePath }),
       });
 
-      if (!res.body) throw new Error("No response");
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-
-        for (const chunk of events) {
-          const lines = chunk.split("\n");
-          const eventType = lines.find((l) => l.startsWith("event:"))?.replace("event: ", "");
-          const dataLine = lines.find((l) => l.startsWith("data:"))?.replace("data: ", "");
-          if (!eventType || !dataLine) continue;
-
-          try {
-            const data = JSON.parse(dataLine);
-            if (eventType === "output") setOutputs((p) => ({ ...p, [file.relativePath]: (p[file.relativePath] ?? "") + data.text }));
-            else if (eventType === "result") {
-              setResults((p) => ({ ...p, [file.relativePath]: data as RunTestResult }));
-              setOutputs((p) => ({ ...p, [file.relativePath]: data.output ?? "" }));
-            }
-          } catch { /**/ }
-        }
-      }
+      await consumeRunTestStream(res, {
+        onOutput: (chunk) => setOutputs((p) => ({ ...p, [file.relativePath]: (p[file.relativePath] ?? "") + chunk })),
+        onResult: (data) => {
+          setResults((p) => ({ ...p, [file.relativePath]: data }));
+          setOutputs((p) => ({ ...p, [file.relativePath]: data.output ?? "" }));
+        },
+      });
     } catch (e) {
       setOutputs((p) => ({ ...p, [file.relativePath]: `Error: ${e instanceof Error ? e.message : "Unknown"}` }));
     } finally {

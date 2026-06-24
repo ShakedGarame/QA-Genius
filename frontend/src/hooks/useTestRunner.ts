@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { RunTestResult, FailureAnalysis, McpStep } from "../types";
 import { buildOpenAIKeyHeaders } from "../lib/apiKeys";
+import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, requireGitHubTokenForCloudRun } from "../lib/cloudRunner";
 
 export function useTestRunner() {
   const [isRunning, setIsRunning] = useState(false);
@@ -22,50 +23,46 @@ export function useTestRunner() {
     setMcpSteps([]);
 
     try {
+      if (!requireGitHubTokenForCloudRun()) {
+        setOutput("Error: Add a GitHub PAT in Settings → Cloud Test Runner to run tests in the cloud on Vercel.");
+        return;
+      }
+
       const res = await fetch("/api/run-test", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildRunTestHeaders(),
         credentials: "include",
         body: JSON.stringify({ code }),
       });
 
-      if (!res.body) throw new Error("No response body");
+      let workflowRunId: number | undefined;
+      let gotResult = false;
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      await consumeRunTestStream(res, {
+        onStatus: (msg, progress) => {
+          setStatusMessage(msg);
+          setProgress(progress);
+        },
+        onOutput: (chunk) => setOutput((prev) => prev + chunk),
+        onResult: (r) => {
+          gotResult = true;
+          setResult(r);
+          setOutput(r.output);
+          setProgress(100);
+        },
+        onWorkflowRunId: (id) => { workflowRunId = id; },
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-
-        for (const chunk of events) {
-          const lines = chunk.split("\n");
-          const eventType = lines.find((l) => l.startsWith("event:"))?.replace("event: ", "");
-          const dataLine = lines.find((l) => l.startsWith("data:"))?.replace("data: ", "");
-
-          if (!eventType || !dataLine) continue;
-
-          try {
-            const data = JSON.parse(dataLine);
-            if (eventType === "status") {
-              setStatusMessage(data.message ?? "");
-              setProgress(data.progress ?? 0);
-            } else if (eventType === "result") {
-              const r = data as RunTestResult;
-              setResult(r);
-              setOutput(r.output);
-              setProgress(100);
-            } else if (eventType === "error") {
-              setOutput((prev) => prev + `\n⚠ ${data.message}`);
-            }
-          } catch {
-            // ignore parse errors for malformed chunks
+      if (workflowRunId && !gotResult) {
+        setStatusMessage("⏳ Cloud run in progress…");
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const status = await pollCloudRunStatus(workflowRunId);
+          setOutput(status.output);
+          if (status.status === "passed" || status.status === "failed") {
+            setResult(status);
+            setProgress(100);
+            break;
           }
         }
       }

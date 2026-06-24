@@ -1,0 +1,63 @@
+name: QA-Genius Cloud Playwright Runner
+
+on:
+  repository_dispatch:
+    types: [trigger-playwright-test]
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Materialize cloud test file
+        env:
+          RELATIVE_PATH: ${{ github.event.client_payload.relative_path }}
+          TEST_CODE_B64: ${{ github.event.client_payload.test_code_b64 }}
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const rel = process.env.RELATIVE_PATH;
+          const b64 = process.env.TEST_CODE_B64;
+          if (!rel || !b64) {
+            console.error("Missing relative_path or test_code_b64 in client_payload");
+            process.exit(1);
+          }
+          if (rel.includes("..")) {
+            console.error("Invalid relative_path");
+            process.exit(1);
+          }
+          const code = Buffer.from(b64, "base64").toString("utf8");
+          const target = path.join("tests", "generated", rel);
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, code, "utf8");
+          console.log(`Wrote cloud test: ${target} (${code.length} bytes)`);
+          NODE
+
+      - name: Run Playwright test
+        env:
+          BASE_URL: ${{ github.event.client_payload.base_url || 'https://example.com' }}
+          CI: "true"
+        run: |
+          TEST_PATH="tests/generated/${{ github.event.client_payload.relative_path }}"
+          echo "Running: npx playwright test ${TEST_PATH}"
+          npx playwright test "${TEST_PATH}" --config=playwright.config.ts --reporter=list
