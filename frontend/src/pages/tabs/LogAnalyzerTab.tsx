@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   BrainCircuit,
   Loader2,
@@ -13,6 +13,7 @@ import {
 import clsx from "clsx";
 import { RawLogAnalysisResponse } from "../../types";
 import { buildOpenAIKeyHeaders } from "../../lib/apiKeys";
+import { readPendingAnalyzerPayload } from "../../lib/cloudRunner";
 
 const LOG_SOURCES = [
   { value: "playwright", label: "Playwright Test Failure", icon: "🎭", placeholder: `Error: Timed out 5000ms waiting for expect(locator).toBeVisible()
@@ -66,7 +67,6 @@ export default function LogAnalyzerTab() {
   const [statusMessage, setStatusMessage] = useState("");
   const [result, setResult] = useState<RawLogAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const autoTriggerRef = useRef(false);
 
   const activeSource = LOG_SOURCES.find((s) => s.value === source)!;
 
@@ -129,27 +129,39 @@ export default function LogAnalyzerTab() {
     }
   }, [rawLogs, source]);
 
-  useEffect(() => {
-    const onPopulate = (event: Event) => {
-      const detail = (event as CustomEvent<{ logs: string; source?: LogSource; autoTrigger?: boolean }>).detail;
-      if (!detail?.logs) return;
+  const applyPopulate = useCallback(
+    (detail: { logs: string; source?: LogSource; autoTrigger?: boolean }) => {
+      if (!detail.logs?.trim()) return;
       const incomingSource = detail.source ?? "playwright";
       setRawLogs(detail.logs);
       setSource(incomingSource);
       setResult(null);
       setError(null);
       if (detail.autoTrigger) {
-        autoTriggerRef.current = true;
-        // Small delay to let state settle before analyzing
         setTimeout(() => {
           handleAnalyze(detail.logs, incomingSource);
-          autoTriggerRef.current = false;
-        }, 150);
+        }, 100);
       }
+    },
+    [handleAnalyze]
+  );
+
+  useEffect(() => {
+    const pending = readPendingAnalyzerPayload();
+    if (pending?.logs) {
+      applyPopulate({ logs: pending.logs, source: pending.source as LogSource, autoTrigger: pending.autoTrigger });
+    }
+  }, [applyPopulate]);
+
+  useEffect(() => {
+    const onPopulate = (event: Event) => {
+      const detail = (event as CustomEvent<{ logs: string; source?: LogSource; autoTrigger?: boolean }>).detail;
+      if (!detail?.logs) return;
+      applyPopulate(detail);
     };
     window.addEventListener("qa-genius:populate-log-analyzer", onPopulate);
     return () => window.removeEventListener("qa-genius:populate-log-analyzer", onPopulate);
-  }, [handleAnalyze]);
+  }, [applyPopulate]);
 
   const handleClear = () => {
     setRawLogs("");

@@ -1,6 +1,15 @@
 import { RunTestResult } from "../types";
 import { buildGitHubTokenHeaders, readGitHubTokenForRequest } from "./githubToken";
 
+const ANALYZER_PENDING_KEY = "qa-genius:pending-analyzer";
+
+export interface AnalyzerRoutePayload {
+  logs: string;
+  source: string;
+  autoTrigger: boolean;
+  ts: number;
+}
+
 export async function pollCloudRunStatus(workflowRunId: number): Promise<RunTestResult> {
   const res = await fetch(`/api/run-test/cloud-status/${workflowRunId}`, {
     credentials: "include",
@@ -9,14 +18,18 @@ export async function pollCloudRunStatus(workflowRunId: number): Promise<RunTest
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? "Failed to fetch cloud status");
 
-  if (json.status !== "completed") {
+  const ghStatus = String(json.status ?? "unknown");
+
+  // GitHub runs are queued/in_progress until status === "completed"
+  if (ghStatus !== "completed") {
     return {
       testId: String(workflowRunId),
-      status: "failed",
-      output: json.output ?? `Cloud run is ${json.status}. Track: ${json.htmlUrl ?? ""}`,
-      duration: json.durationMs ?? 0,
+      status: "running",
+      output: String(json.output ?? `Cloud run is ${ghStatus}. Track: ${json.htmlUrl ?? ""}`),
+      duration: Number(json.durationMs ?? 0),
       cloudRunId: workflowRunId,
-      htmlUrl: json.htmlUrl,
+      htmlUrl: typeof json.htmlUrl === "string" ? json.htmlUrl : undefined,
+      runner: "github-actions",
     };
   }
 
@@ -48,6 +61,90 @@ function mapCloudStatusToResult(workflowRunId: number, json: Record<string, unkn
     htmlUrl: typeof json.htmlUrl === "string" ? json.htmlUrl : undefined,
     runner: "github-actions",
   };
+}
+
+/** Poll until GitHub Actions run completes, then download raw logs on failure. */
+export async function waitForCloudRunCompletion(
+  workflowRunId: number,
+  handlers?: {
+    onProgress?: (message: string, progress: number) => void;
+    onOutput?: (output: string) => void;
+  },
+  options?: { maxAttempts?: number; delayMs?: number }
+): Promise<RunTestResult> {
+  const maxAttempts = options?.maxAttempts ?? 40;
+  const delayMs = options?.delayMs ?? 5000;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const status = await pollCloudRunStatus(workflowRunId);
+    handlers?.onOutput?.(status.output);
+
+    if (status.status === "running") {
+      const pct = Math.min(90, 25 + i * 2);
+      const msg = status.output.includes("in_progress")
+        ? "🚀 Running Playwright in GitHub Actions…"
+        : "⏳ Waiting for GitHub Actions run…";
+      handlers?.onProgress?.(msg, pct);
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
+    }
+
+    if (status.status === "failed" && status.cloudRunId) {
+      handlers?.onProgress?.("📋 Downloading raw failure logs…", 95);
+      try {
+        return await fetchCloudRunLogs(status.cloudRunId);
+      } catch {
+        return status;
+      }
+    }
+
+    return status;
+  }
+
+  return pollCloudRunStatus(workflowRunId);
+}
+
+/** Ensure failed cloud runs include downloaded raw GitHub logs in the terminal. */
+export async function enrichFailedCloudRun(result: RunTestResult): Promise<RunTestResult> {
+  if (result.status !== "failed" || !result.cloudRunId) return result;
+  if (hasSubstantialFailureLogs(result)) return result;
+
+  try {
+    return await fetchCloudRunLogs(result.cloudRunId);
+  } catch {
+    return result;
+  }
+}
+
+function hasSubstantialFailureLogs(result: RunTestResult): boolean {
+  const logs = result.rawLogs ?? result.output ?? "";
+  if (logs.length < 80) return false;
+  if (/^Cloud run is (in_progress|queued)/i.test(logs.trim())) return false;
+  return (
+    logs.includes("RAW GITHUB ACTIONS LOGS") ||
+    /TimeoutError|Error:|FAIL|page\.goto|Navigation to/i.test(logs)
+  );
+}
+
+/** Pick the best log text for AI analysis (raw logs preferred). */
+export function getActionableFailureLogs(
+  result: RunTestResult | null | undefined,
+  terminalOutput: string
+): string {
+  const candidates = [
+    result?.rawLogs,
+    result?.output,
+    result?.errorDetails,
+    terminalOutput,
+  ].filter((c): c is string => Boolean(c?.trim()));
+
+  for (const c of candidates) {
+    if (c.includes("RAW GITHUB ACTIONS LOGS") || /TimeoutError|Error:|page\.goto/i.test(c)) {
+      return c;
+    }
+  }
+
+  return candidates[0] ?? "";
 }
 
 export async function consumeRunTestStream(
@@ -114,22 +211,50 @@ export function requireGitHubTokenForCloudRun(): string | null {
   return readGitHubTokenForRequest();
 }
 
-/** Navigate to Log Analyzer with pre-filled GitHub failure logs and auto-trigger analysis. */
+export function readPendingAnalyzerPayload(): AnalyzerRoutePayload | null {
+  try {
+    const raw = sessionStorage.getItem(ANALYZER_PENDING_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(ANALYZER_PENDING_KEY);
+    return JSON.parse(raw) as AnalyzerRoutePayload;
+  } catch {
+    return null;
+  }
+}
+
+/** Navigate to Log Analyzer with live failure logs and auto-trigger AI analysis. */
 export function routeFailureLogsToAnalyzer(logs: string, source = "playwright"): void {
+  const trimmed = logs.trim();
+  if (!trimmed) return;
+
+  const payload: AnalyzerRoutePayload = {
+    logs: trimmed,
+    source,
+    autoTrigger: true,
+    ts: Date.now(),
+  };
+
+  sessionStorage.setItem(ANALYZER_PENDING_KEY, JSON.stringify(payload));
+
   window.dispatchEvent(
-    new CustomEvent("qa-genius:populate-log-analyzer", {
-      detail: { logs, source, autoTrigger: true },
-    })
+    new CustomEvent("qa-genius:populate-log-analyzer", { detail: payload })
   );
-  window.dispatchEvent(
-    new CustomEvent("qa-genius:navigate-tab", {
-      detail: { tab: "analyzer" },
-    })
-  );
+
+  queueMicrotask(() => {
+    window.dispatchEvent(
+      new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "analyzer" } })
+    );
+  });
 }
 
 /** Route to Test Repository tab and select + run a specific test file. */
-export function routeRunToRepository(file: { relativePath: string; featureSlug: string; fileName: string; sizeBytes: number; modifiedAt: string }): void {
+export function routeRunToRepository(file: {
+  relativePath: string;
+  featureSlug: string;
+  fileName: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}): void {
   window.dispatchEvent(
     new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "repository" } })
   );

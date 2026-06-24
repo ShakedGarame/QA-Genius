@@ -13,7 +13,7 @@ import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 import { useTestRunner } from "../../hooks/useTestRunner";
 import { useAuth } from "../../hooks/useAuth";
 import { buildOpenAIKeyHeaders, readOpenAIKeyForRequest } from "../../lib/apiKeys";
-import { routeFailureLogsToAnalyzer } from "../../lib/cloudRunner";
+import { routeFailureLogsToAnalyzer, getActionableFailureLogs } from "../../lib/cloudRunner";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
 
 // ─── Feature Name Input ───────────────────────────────────────────────────────
@@ -446,7 +446,7 @@ export default function TestGeneratorTab() {
   };
 
   const handleAnalyzeWithGitHubLogs = () => {
-    const logs = runResult?.rawLogs ?? runResult?.output ?? output;
+    const logs = getActionableFailureLogs(runResult, output);
     routeFailureLogsToAnalyzer(logs, "playwright");
   };
 
@@ -676,7 +676,7 @@ export default function TestGeneratorTab() {
             {showFailureAnalyzer && (
               <FailureAnalyzer
                 errorDetails={runResult?.errorDetails ?? ""}
-                failureLog={runResult?.rawLogs ?? runResult?.output ?? output}
+                failureLog={getActionableFailureLogs(runResult, output)}
                 testCode={editedCode}
                 hasCoralogix={!!user?.hasCoralogix}
                 onAnalyze={handleAnalyze}

@@ -9,7 +9,7 @@ import { useTestRepository } from "../../hooks/useTestRepository";
 import { useAuth } from "../../hooks/useAuth";
 import { FeatureGroup, RunTestResult, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
-import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, fetchCloudRunLogs, requireGitHubTokenForCloudRun, routeFailureLogsToAnalyzer } from "../../lib/cloudRunner";
+import { buildRunTestHeaders, consumeRunTestStream, waitForCloudRunCompletion, enrichFailedCloudRun, requireGitHubTokenForCloudRun, routeFailureLogsToAnalyzer, getActionableFailureLogs } from "../../lib/cloudRunner";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 
 function formatBytes(b: number) {
@@ -334,51 +334,33 @@ export default function TestRepositoryTab() {
       });
 
       let workflowRunId: number | undefined;
-      let gotResult = false;
       let streamResult: RunTestResult | undefined;
 
       await consumeRunTestStream(res, {
         onStatus: (msg, progress) => { setLiveStatus(msg); setLiveProgress(progress); },
         onOutput: (chunk) => setLiveOutput((p) => p + chunk),
-        onResult: (data) => {
-          gotResult = true;
-          streamResult = data;
-          setFileResults((p) => ({ ...p, [file.relativePath]: data }));
-          setLiveOutput(data.output ?? "");
-          setLiveProgress(100);
-        },
+        onResult: (data) => { streamResult = data; },
         onWorkflowRunId: (id) => { workflowRunId = id; },
       });
 
-      if (streamResult?.status === "failed" && streamResult.cloudRunId) {
-        try {
-          const enriched = await fetchCloudRunLogs(streamResult.cloudRunId);
-          setFileResults((p) => ({ ...p, [file.relativePath]: enriched }));
-          setLiveOutput(enriched.output);
-        } catch {
-          // keep prior output
-        }
+      let finalResult: RunTestResult | undefined;
+
+      if (streamResult) {
+        finalResult =
+          streamResult.status === "failed"
+            ? await enrichFailedCloudRun(streamResult)
+            : streamResult;
+      } else if (workflowRunId) {
+        finalResult = await waitForCloudRunCompletion(workflowRunId, {
+          onProgress: (msg, pct) => { setLiveStatus(msg); setLiveProgress(pct); },
+          onOutput: (text) => setLiveOutput(text),
+        });
       }
 
-      if (workflowRunId && !gotResult) {
-        setLiveStatus("⏳ Cloud run still in progress — fetching latest status…");
-        for (let i = 0; i < 30; i++) {
-          await new Promise((r) => setTimeout(r, 5000));
-          const status = await pollCloudRunStatus(workflowRunId);
-          setLiveOutput(status.output);
-          if (status.status === "passed" || status.status === "failed") {
-            let finalResult = status;
-            if (status.status === "failed" && status.cloudRunId) {
-              try {
-                finalResult = await fetchCloudRunLogs(status.cloudRunId);
-              } catch { /**/ }
-            }
-            setFileResults((p) => ({ ...p, [file.relativePath]: finalResult }));
-            setLiveOutput(finalResult.output);
-            setLiveProgress(100);
-            break;
-          }
-        }
+      if (finalResult) {
+        setFileResults((p) => ({ ...p, [file.relativePath]: finalResult! }));
+        setLiveOutput(finalResult.output);
+        setLiveProgress(100);
       }
     } catch (e) {
       setLiveOutput(`Error: ${e instanceof Error ? e.message : "Unknown error"}`);
@@ -582,15 +564,15 @@ export default function TestRepositoryTab() {
               <div className="flex-shrink-0 px-4 pb-4">
                 <FailureAnalyzer
                   errorDetails={selectedResult.errorDetails ?? ""}
-                  failureLog={selectedResult.rawLogs ?? selectedResult.output ?? liveOutput}
+                  failureLog={getActionableFailureLogs(selectedResult, liveOutput)}
                   testCode={previewCode ?? ""}
                   hasCoralogix={!!user?.hasCoralogix}
                   onAnalyze={() => routeFailureLogsToAnalyzer(
-                    selectedResult.rawLogs ?? selectedResult.output ?? liveOutput,
+                    getActionableFailureLogs(selectedResult, liveOutput),
                     "playwright"
                   )}
                   onAnalyzeWithGitHubLogs={() => routeFailureLogsToAnalyzer(
-                    selectedResult.rawLogs ?? selectedResult.output ?? liveOutput,
+                    getActionableFailureLogs(selectedResult, liveOutput),
                     "playwright"
                   )}
                   onOpenSettings={() =>

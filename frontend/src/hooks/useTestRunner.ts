@@ -1,7 +1,13 @@
 import { useState, useCallback } from "react";
 import { RunTestResult, FailureAnalysis, McpStep } from "../types";
 import { buildOpenAIKeyHeaders } from "../lib/apiKeys";
-import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, fetchCloudRunLogs, requireGitHubTokenForCloudRun } from "../lib/cloudRunner";
+import {
+  buildRunTestHeaders,
+  consumeRunTestStream,
+  waitForCloudRunCompletion,
+  enrichFailedCloudRun,
+  requireGitHubTokenForCloudRun,
+} from "../lib/cloudRunner";
 
 export function useTestRunner() {
   const [isRunning, setIsRunning] = useState(false);
@@ -49,49 +55,29 @@ export function useTestRunner() {
         onResult: (r) => {
           gotResult = true;
           streamResult = r;
-          setResult(r);
-          setOutput(r.output);
-          setProgress(100);
         },
         onWorkflowRunId: (id) => { workflowRunId = id; },
       });
 
-      if (streamResult?.status === "failed" && streamResult.cloudRunId) {
-        try {
-          const enriched = await fetchCloudRunLogs(streamResult.cloudRunId);
-          setResult(enriched);
-          setOutput(enriched.output);
-        } catch {
-          // keep SSE result
-        }
-      }
-
-      if (workflowRunId && !gotResult) {
-        setStatusMessage("⏳ Cloud run in progress…");
-        for (let i = 0; i < 30; i++) {
-          await new Promise((r) => setTimeout(r, 5000));
-          const status = await pollCloudRunStatus(workflowRunId);
-          if (status.output && !status.output.startsWith("Cloud run is")) {
-            setOutput(status.output);
-          }
-          if (status.status === "passed" || status.status === "failed") {
-            if (status.status === "failed" && status.cloudRunId) {
-              try {
-                const withLogs = await fetchCloudRunLogs(status.cloudRunId);
-                setResult(withLogs);
-                setOutput(withLogs.output);
-              } catch {
-                setResult(status);
-                setOutput(status.output);
-              }
-            } else {
-              setResult(status);
-              setOutput(status.output);
-            }
-            setProgress(100);
-            break;
-          }
-        }
+      if (streamResult) {
+        const finalResult =
+          streamResult.status === "failed"
+            ? await enrichFailedCloudRun(streamResult)
+            : streamResult;
+        setResult(finalResult);
+        setOutput(finalResult.output);
+        setProgress(100);
+      } else if (workflowRunId) {
+        const finalResult = await waitForCloudRunCompletion(workflowRunId, {
+          onProgress: (msg, pct) => {
+            setStatusMessage(msg);
+            setProgress(pct);
+          },
+          onOutput: (text) => setOutput(text),
+        });
+        setResult(finalResult);
+        setOutput(finalResult.output);
+        setProgress(100);
       }
     } catch (e) {
       setOutput(`Error: ${e instanceof Error ? e.message : "Unknown error"}`);

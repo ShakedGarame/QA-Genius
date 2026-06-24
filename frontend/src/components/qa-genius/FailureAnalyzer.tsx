@@ -75,7 +75,7 @@ export default function FailureAnalyzer({
               <p className="text-xs text-slate-400 mt-0.5">
                 {hasCoralogix
                   ? "Fetch Coralogix logs via MCP and get an AI root-cause analysis"
-                  : "Analyze the GitHub Actions failure log with AI in the Log Analyzer tab"}
+                  : "Send the failure logs shown above to AI for a plain-language explanation"}
               </p>
             </div>
           </div>
@@ -92,7 +92,7 @@ export default function FailureAnalyzer({
               ) : (
                 <BrainCircuit className="w-4 h-4" />
               )}
-              {isAnalyzing ? "Analyzing…" : "Explain Failure & Analyze Logs"}
+              {isAnalyzing ? "Analyzing…" : "Explain Failure with AI"}
             </button>
           </div>
         </div>

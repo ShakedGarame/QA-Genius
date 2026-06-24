@@ -21,7 +21,7 @@ export interface GenerateTestsResult {
 
 export interface RunTestResult {
   testId: string;
-  status: "passed" | "failed" | "error";
+  status: "passed" | "failed" | "error" | "running";
   output: string;
   duration: number;
   errorDetails?: string;
