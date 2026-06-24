@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BrainCircuit,
   Sparkles,
@@ -178,6 +178,15 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const activeItem = NAV_ITEMS.find((t) => t.id === activeTab) ?? NAV_ITEMS[0];
+
+  useEffect(() => {
+    const onNavigate = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab: TabId }>).detail?.tab;
+      if (tab) setActiveTab(tab);
+    };
+    window.addEventListener("qa-genius:navigate-tab", onNavigate);
+    return () => window.removeEventListener("qa-genius:navigate-tab", onNavigate);
+  }, []);
 
   const selectTab = (id: TabId) => {
     setActiveTab(id);

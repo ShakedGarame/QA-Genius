@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { RunTestResult, FailureAnalysis, McpStep } from "../types";
 import { buildOpenAIKeyHeaders } from "../lib/apiKeys";
-import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, requireGitHubTokenForCloudRun } from "../lib/cloudRunner";
+import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, fetchCloudRunLogs, requireGitHubTokenForCloudRun } from "../lib/cloudRunner";
 
 export function useTestRunner() {
   const [isRunning, setIsRunning] = useState(false);
@@ -23,7 +23,12 @@ export function useTestRunner() {
     setMcpSteps([]);
 
     try {
-      if (!requireGitHubTokenForCloudRun()) {
+      let workflowRunId: number | undefined;
+      let gotResult = false;
+      let streamResult: RunTestResult | undefined;
+      const isCloudDeploy = /vercel\.app$/i.test(window.location.hostname);
+
+      if (isCloudDeploy && !requireGitHubTokenForCloudRun()) {
         setOutput("Error: Add a GitHub PAT in Settings → Cloud Test Runner to run tests in the cloud on Vercel.");
         return;
       }
@@ -35,9 +40,6 @@ export function useTestRunner() {
         body: JSON.stringify({ code }),
       });
 
-      let workflowRunId: number | undefined;
-      let gotResult = false;
-
       await consumeRunTestStream(res, {
         onStatus: (msg, progress) => {
           setStatusMessage(msg);
@@ -46,6 +48,7 @@ export function useTestRunner() {
         onOutput: (chunk) => setOutput((prev) => prev + chunk),
         onResult: (r) => {
           gotResult = true;
+          streamResult = r;
           setResult(r);
           setOutput(r.output);
           setProgress(100);
@@ -53,14 +56,38 @@ export function useTestRunner() {
         onWorkflowRunId: (id) => { workflowRunId = id; },
       });
 
+      if (streamResult?.status === "failed" && streamResult.cloudRunId) {
+        try {
+          const enriched = await fetchCloudRunLogs(streamResult.cloudRunId);
+          setResult(enriched);
+          setOutput(enriched.output);
+        } catch {
+          // keep SSE result
+        }
+      }
+
       if (workflowRunId && !gotResult) {
         setStatusMessage("⏳ Cloud run in progress…");
         for (let i = 0; i < 30; i++) {
           await new Promise((r) => setTimeout(r, 5000));
           const status = await pollCloudRunStatus(workflowRunId);
-          setOutput(status.output);
+          if (status.output && !status.output.startsWith("Cloud run is")) {
+            setOutput(status.output);
+          }
           if (status.status === "passed" || status.status === "failed") {
-            setResult(status);
+            if (status.status === "failed" && status.cloudRunId) {
+              try {
+                const withLogs = await fetchCloudRunLogs(status.cloudRunId);
+                setResult(withLogs);
+                setOutput(withLogs.output);
+              } catch {
+                setResult(status);
+                setOutput(status.output);
+              }
+            } else {
+              setResult(status);
+              setOutput(status.output);
+            }
             setProgress(100);
             break;
           }

@@ -1,3 +1,5 @@
+import AdmZip from "adm-zip";
+
 const GITHUB_API = "https://api.github.com";
 const DEFAULT_REPO = process.env.GITHUB_ACTIONS_REPO ?? "ShakedGarame/QA-Genius";
 
@@ -22,8 +24,10 @@ export interface CloudRunStatus {
   conclusion: string | null;
   htmlUrl: string;
   output: string;
+  rawLogs: string;
   durationMs: number;
   passed: boolean;
+  errorDetails?: string;
 }
 
 function parseRepo(slug = DEFAULT_REPO): { owner: string; repo: string } {
@@ -117,7 +121,42 @@ export async function getWorkflowRun(token: string, runId: number): Promise<Work
   };
 }
 
-async function buildRunOutput(token: string, runId: number): Promise<string> {
+/** Download and extract the full GitHub Actions log archive for a workflow run. */
+export async function fetchRawWorkflowLogs(token: string, runId: number): Promise<string> {
+  const { owner, repo } = parseRepo();
+  const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/logs`, {
+    headers: githubHeaders(token),
+    redirect: "follow",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GitHub logs download failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const zip = new AdmZip(buffer);
+  const parts: string[] = [];
+
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    parts.push(`\n${"=".repeat(72)}\n${entry.entryName}\n${"=".repeat(72)}\n`);
+    parts.push(entry.getData().toString("utf8"));
+  }
+
+  return parts.join("\n").trim() || "No log files found in GitHub Actions archive.";
+}
+
+function extractFailureSnippet(rawLogs: string): string {
+  const lines = rawLogs.split("\n");
+  const hits = lines.filter((line) =>
+    /error|failed|timeout|expect\(|✘|✗|FAIL|page\.goto|Navigation to/i.test(line)
+  );
+  if (hits.length === 0) return rawLogs.slice(0, 1200);
+  return hits.slice(0, 40).join("\n");
+}
+
+async function buildRunSummary(token: string, runId: number): Promise<string> {
   const { owner, repo } = parseRepo();
   const run = await getWorkflowRun(token, runId);
   const jobsData = await githubJson<{ jobs: Array<Record<string, unknown>> }>(
@@ -128,7 +167,7 @@ async function buildRunOutput(token: string, runId: number): Promise<string> {
   const lines: string[] = [
     `GitHub Actions run #${runId}`,
     `Status: ${run.status} · Conclusion: ${run.conclusion ?? "pending"}`,
-    `Logs: ${run.htmlUrl}`,
+    `Track: ${run.htmlUrl}`,
     "",
   ];
 
@@ -142,6 +181,41 @@ async function buildRunOutput(token: string, runId: number): Promise<string> {
   }
 
   return lines.join("\n");
+}
+
+export async function buildCloudRunOutput(
+  token: string,
+  runId: number,
+  passed: boolean
+): Promise<{ output: string; rawLogs: string; errorDetails?: string }> {
+  const summary = await buildRunSummary(token, runId);
+
+  if (passed) {
+    return { output: summary, rawLogs: summary };
+  }
+
+  let rawLogs = summary;
+  try {
+    rawLogs = await fetchRawWorkflowLogs(token, runId);
+  } catch (err) {
+    rawLogs = `${summary}\n\n⚠ Could not download raw logs: ${err instanceof Error ? err.message : "unknown error"}`;
+  }
+
+  const output = [
+    summary,
+    "",
+    "=".repeat(72),
+    "RAW GITHUB ACTIONS LOGS",
+    "=".repeat(72),
+    "",
+    rawLogs,
+  ].join("\n");
+
+  return {
+    output,
+    rawLogs,
+    errorDetails: extractFailureSnippet(rawLogs),
+  };
 }
 
 export async function waitForWorkflowCompletion(
@@ -162,15 +236,16 @@ export async function waitForWorkflowCompletion(
     } else if (run.status === "in_progress") {
       onProgress?.("🚀 Installing browsers & running Playwright in the cloud…", progress);
     } else if (run.status === "completed") {
-      onProgress?.("📋 Fetching cloud run results…", 95);
-      const output = await buildRunOutput(token, runId);
+      onProgress?.("📋 Downloading raw GitHub Actions logs…", 95);
       const passed = run.conclusion === "success";
+      const built = await buildCloudRunOutput(token, runId, passed);
       return {
         runId,
         status: run.status,
         conclusion: run.conclusion,
         htmlUrl: run.htmlUrl,
-        output,
+        output: built.output,
+        rawLogs: built.rawLogs,
         durationMs: Date.now() - startedAtMs,
         passed,
       };
@@ -189,6 +264,7 @@ export async function waitForWorkflowCompletion(
       `Cloud run still ${run.status} after polling.\n` +
       `Track progress: ${run.htmlUrl}\n` +
       `Re-check status from the app or GitHub Actions tab.`,
+    rawLogs: "",
     durationMs: Date.now() - startedAtMs,
     passed: false,
   };
@@ -208,19 +284,24 @@ export async function resolveCloudRunStatus(
       conclusion: run.conclusion,
       htmlUrl: run.htmlUrl,
       output: `Cloud run is ${run.status}. Track: ${run.htmlUrl}`,
+      rawLogs: "",
       durationMs: 0,
       passed: false,
     };
   }
 
-  const output = await buildRunOutput(token, runId);
+  const passed = run.conclusion === "success";
+  const built = await buildCloudRunOutput(token, runId, passed);
+
   return {
     runId,
     status: run.status,
     conclusion: run.conclusion,
     htmlUrl: run.htmlUrl,
-    output,
+    output: built.output,
+    rawLogs: built.rawLogs,
     durationMs: Date.now() - startedAtMs,
-    passed: run.conclusion === "success",
+    passed,
+    errorDetails: built.errorDetails,
   };
 }

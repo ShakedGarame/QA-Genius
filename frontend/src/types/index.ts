@@ -25,6 +25,10 @@ export interface RunTestResult {
   output: string;
   duration: number;
   errorDetails?: string;
+  cloudRunId?: number;
+  htmlUrl?: string;
+  rawLogs?: string;
+  runner?: string;
 }
 
 export interface McpLog {

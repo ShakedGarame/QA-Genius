@@ -9,12 +9,44 @@ export async function pollCloudRunStatus(workflowRunId: number): Promise<RunTest
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? "Failed to fetch cloud status");
 
+  if (json.status !== "completed") {
+    return {
+      testId: String(workflowRunId),
+      status: "failed",
+      output: json.output ?? `Cloud run is ${json.status}. Track: ${json.htmlUrl ?? ""}`,
+      duration: json.durationMs ?? 0,
+      cloudRunId: workflowRunId,
+      htmlUrl: json.htmlUrl,
+    };
+  }
+
+  return mapCloudStatusToResult(workflowRunId, json);
+}
+
+export async function fetchCloudRunLogs(workflowRunId: number): Promise<RunTestResult> {
+  const res = await fetch(`/api/run-test/cloud-logs/${workflowRunId}`, {
+    credentials: "include",
+    headers: buildGitHubTokenHeaders(),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? "Failed to fetch cloud logs");
+  return mapCloudStatusToResult(workflowRunId, json);
+}
+
+function mapCloudStatusToResult(workflowRunId: number, json: Record<string, unknown>): RunTestResult {
+  const passed = Boolean(json.passed);
+  const output = String(json.output ?? json.rawLogs ?? "");
+  const rawLogs = String(json.rawLogs ?? output);
   return {
     testId: String(workflowRunId),
-    status: json.passed ? "passed" : "failed",
-    output: json.output ?? "",
-    duration: json.durationMs ?? 0,
-    errorDetails: json.passed ? undefined : json.output?.slice(0, 800),
+    status: passed ? "passed" : "failed",
+    output,
+    rawLogs,
+    duration: Number(json.durationMs ?? 0),
+    errorDetails: passed ? undefined : String(json.errorDetails ?? rawLogs.slice(0, 1200)),
+    cloudRunId: workflowRunId,
+    htmlUrl: typeof json.htmlUrl === "string" ? json.htmlUrl : undefined,
+    runner: "github-actions",
   };
 }
 
@@ -80,4 +112,18 @@ export function buildRunTestHeaders(): Record<string, string> {
 
 export function requireGitHubTokenForCloudRun(): string | null {
   return readGitHubTokenForRequest();
+}
+
+/** Navigate to Log Analyzer with pre-filled GitHub failure logs. */
+export function routeFailureLogsToAnalyzer(logs: string, source = "playwright"): void {
+  window.dispatchEvent(
+    new CustomEvent("qa-genius:populate-log-analyzer", {
+      detail: { logs, source },
+    })
+  );
+  window.dispatchEvent(
+    new CustomEvent("qa-genius:navigate-tab", {
+      detail: { tab: "analyzer" },
+    })
+  );
 }

@@ -151,9 +151,10 @@ async function runViaGitHubActions(
     testId: id,
     status: result.passed ? "passed" : "failed",
     output: result.output,
+    rawLogs: result.rawLogs,
     duration: result.durationMs,
     exitCode: result.passed ? 0 : 1,
-    errorDetails: result.passed ? undefined : result.output.slice(0, 800),
+    errorDetails: result.passed ? undefined : (result.errorDetails ?? result.rawLogs.slice(0, 800)),
     cloudRunId: workflowRunId,
     htmlUrl: result.htmlUrl,
     runner: "github-actions",
@@ -184,6 +185,34 @@ router.get("/run-test/cloud-status/:runId", async (req: Request, res: Response) 
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch cloud status";
+    return res.status(500).json({ error: message });
+  }
+});
+
+router.get("/run-test/cloud-logs/:runId", async (req: Request, res: Response) => {
+  const githubToken = extractGitHubTokenFromRequest(req);
+  if (!githubToken) {
+    return res.status(401).json({ error: "GitHub token required in x-user-github-token header" });
+  }
+
+  const runId = Number(req.params.runId);
+  if (!Number.isFinite(runId)) {
+    return res.status(400).json({ error: "Invalid run id" });
+  }
+
+  try {
+    const status = await resolveCloudRunStatus(githubToken, runId);
+    return res.json({
+      success: true,
+      runId,
+      passed: status.passed,
+      htmlUrl: status.htmlUrl,
+      output: status.output,
+      rawLogs: status.rawLogs,
+      errorDetails: status.errorDetails,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch cloud logs";
     return res.status(500).json({ error: message });
   }
 });

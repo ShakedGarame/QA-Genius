@@ -11,7 +11,9 @@ import TestEditor from "../../components/qa-genius/TestEditor";
 import ExecutionConsole from "../../components/qa-genius/ExecutionConsole";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 import { useTestRunner } from "../../hooks/useTestRunner";
+import { useAuth } from "../../hooks/useAuth";
 import { buildOpenAIKeyHeaders, readOpenAIKeyForRequest } from "../../lib/apiKeys";
+import { routeFailureLogsToAnalyzer } from "../../lib/cloudRunner";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
 
 // ─── Feature Name Input ───────────────────────────────────────────────────────
@@ -320,6 +322,7 @@ export default function TestGeneratorTab() {
     isRunning, output, progress, statusMessage, result: runResult,
     runTest, isAnalyzing, mcpSteps, analysis, analyzeFailure,
   } = useTestRunner();
+  const { user } = useAuth();
 
   const handleSaveFeatureName = () => {
     if (!featureName.trim()) {
@@ -438,8 +441,17 @@ export default function TestGeneratorTab() {
 
   const handleAnalyze = async () => {
     const code = editedCode || genResult?.code || "";
-    const err = runResult?.errorDetails ?? output;
+    const err = runResult?.errorDetails ?? runResult?.rawLogs ?? output;
     await analyzeFailure(code, err);
+  };
+
+  const handleAnalyzeWithGitHubLogs = () => {
+    const logs = runResult?.rawLogs ?? runResult?.output ?? output;
+    routeFailureLogsToAnalyzer(logs, "playwright");
+  };
+
+  const handleOpenSettingsFromFailure = () => {
+    window.dispatchEvent(new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "settings" } }));
   };
 
   const handleReset = () => {
@@ -664,8 +676,12 @@ export default function TestGeneratorTab() {
             {showFailureAnalyzer && (
               <FailureAnalyzer
                 errorDetails={runResult?.errorDetails ?? ""}
+                failureLog={runResult?.rawLogs ?? runResult?.output ?? output}
                 testCode={editedCode}
+                hasCoralogix={!!user?.hasCoralogix}
                 onAnalyze={handleAnalyze}
+                onAnalyzeWithGitHubLogs={handleAnalyzeWithGitHubLogs}
+                onOpenSettings={handleOpenSettingsFromFailure}
                 isAnalyzing={isAnalyzing}
                 mcpSteps={mcpSteps}
                 analysis={analysis}

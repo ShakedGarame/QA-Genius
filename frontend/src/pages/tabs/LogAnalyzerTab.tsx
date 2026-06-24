@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BrainCircuit,
   Loader2,
@@ -68,6 +68,19 @@ export default function LogAnalyzerTab() {
   const [error, setError] = useState<string | null>(null);
 
   const activeSource = LOG_SOURCES.find((s) => s.value === source)!;
+
+  useEffect(() => {
+    const onPopulate = (event: Event) => {
+      const detail = (event as CustomEvent<{ logs: string; source?: LogSource }>).detail;
+      if (!detail?.logs) return;
+      setRawLogs(detail.logs);
+      setSource(detail.source ?? "playwright");
+      setResult(null);
+      setError(null);
+    };
+    window.addEventListener("qa-genius:populate-log-analyzer", onPopulate);
+    return () => window.removeEventListener("qa-genius:populate-log-analyzer", onPopulate);
+  }, []);
 
   const handleAnalyze = async () => {
     if (!rawLogs.trim()) return;

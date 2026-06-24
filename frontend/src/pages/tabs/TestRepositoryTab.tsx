@@ -8,7 +8,7 @@ import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
 import { FeatureGroup, RunTestResult, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
-import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, requireGitHubTokenForCloudRun } from "../../lib/cloudRunner";
+import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, fetchCloudRunLogs, requireGitHubTokenForCloudRun } from "../../lib/cloudRunner";
 
 function formatBytes(b: number) {
   return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
@@ -284,6 +284,7 @@ export default function TestRepositoryTab() {
     setLiveStatus("Initializing…");
 
     try {
+      const isCloudDeploy = /vercel\.app$/i.test(window.location.hostname);
       const githubToken = requireGitHubTokenForCloudRun();
       const cloudCode = isMock ? MOCK_CODE_MAP[file.relativePath] : undefined;
 
@@ -298,7 +299,7 @@ export default function TestRepositoryTab() {
         return;
       }
 
-      if (!githubToken) {
+      if (isCloudDeploy && !githubToken) {
         setLiveOutput("Error: Add a GitHub PAT in Settings → Cloud Test Runner to execute tests in the cloud.");
         return;
       }
@@ -315,18 +316,30 @@ export default function TestRepositoryTab() {
 
       let workflowRunId: number | undefined;
       let gotResult = false;
+      let streamResult: RunTestResult | undefined;
 
       await consumeRunTestStream(res, {
         onStatus: (msg, progress) => { setLiveStatus(msg); setLiveProgress(progress); },
         onOutput: (chunk) => setLiveOutput((p) => p + chunk),
         onResult: (data) => {
           gotResult = true;
+          streamResult = data;
           setFileResults((p) => ({ ...p, [file.relativePath]: data }));
           setLiveOutput(data.output ?? "");
           setLiveProgress(100);
         },
         onWorkflowRunId: (id) => { workflowRunId = id; },
       });
+
+      if (streamResult?.status === "failed" && streamResult.cloudRunId) {
+        try {
+          const enriched = await fetchCloudRunLogs(streamResult.cloudRunId);
+          setFileResults((p) => ({ ...p, [file.relativePath]: enriched }));
+          setLiveOutput(enriched.output);
+        } catch {
+          // keep prior output
+        }
+      }
 
       if (workflowRunId && !gotResult) {
         setLiveStatus("⏳ Cloud run still in progress — fetching latest status…");
@@ -335,7 +348,14 @@ export default function TestRepositoryTab() {
           const status = await pollCloudRunStatus(workflowRunId);
           setLiveOutput(status.output);
           if (status.status === "passed" || status.status === "failed") {
-            setFileResults((p) => ({ ...p, [file.relativePath]: status }));
+            let finalResult = status;
+            if (status.status === "failed" && status.cloudRunId) {
+              try {
+                finalResult = await fetchCloudRunLogs(status.cloudRunId);
+              } catch { /**/ }
+            }
+            setFileResults((p) => ({ ...p, [file.relativePath]: finalResult }));
+            setLiveOutput(finalResult.output);
             setLiveProgress(100);
             break;
           }
