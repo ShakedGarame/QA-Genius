@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BrainCircuit,
   Loader2,
@@ -66,24 +66,14 @@ export default function LogAnalyzerTab() {
   const [statusMessage, setStatusMessage] = useState("");
   const [result, setResult] = useState<RawLogAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const autoTriggerRef = useRef(false);
 
   const activeSource = LOG_SOURCES.find((s) => s.value === source)!;
 
-  useEffect(() => {
-    const onPopulate = (event: Event) => {
-      const detail = (event as CustomEvent<{ logs: string; source?: LogSource }>).detail;
-      if (!detail?.logs) return;
-      setRawLogs(detail.logs);
-      setSource(detail.source ?? "playwright");
-      setResult(null);
-      setError(null);
-    };
-    window.addEventListener("qa-genius:populate-log-analyzer", onPopulate);
-    return () => window.removeEventListener("qa-genius:populate-log-analyzer", onPopulate);
-  }, []);
-
-  const handleAnalyze = async () => {
-    if (!rawLogs.trim()) return;
+  const handleAnalyze = useCallback(async (logsOverride?: string, sourceOverride?: LogSource) => {
+    const logsToAnalyze = logsOverride ?? rawLogs;
+    const sourceToUse = sourceOverride ?? source;
+    if (!logsToAnalyze.trim()) return;
     setIsAnalyzing(true);
     setResult(null);
     setError(null);
@@ -93,7 +83,7 @@ export default function LogAnalyzerTab() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...buildOpenAIKeyHeaders() },
         credentials: "include",
-        body: JSON.stringify({ rawLogs, source }),
+        body: JSON.stringify({ rawLogs: logsToAnalyze, source: sourceToUse }),
       });
 
       if (!res.body) throw new Error("No response body");
@@ -137,7 +127,29 @@ export default function LogAnalyzerTab() {
       setIsAnalyzing(false);
       setStatusMessage("");
     }
-  };
+  }, [rawLogs, source]);
+
+  useEffect(() => {
+    const onPopulate = (event: Event) => {
+      const detail = (event as CustomEvent<{ logs: string; source?: LogSource; autoTrigger?: boolean }>).detail;
+      if (!detail?.logs) return;
+      const incomingSource = detail.source ?? "playwright";
+      setRawLogs(detail.logs);
+      setSource(incomingSource);
+      setResult(null);
+      setError(null);
+      if (detail.autoTrigger) {
+        autoTriggerRef.current = true;
+        // Small delay to let state settle before analyzing
+        setTimeout(() => {
+          handleAnalyze(detail.logs, incomingSource);
+          autoTriggerRef.current = false;
+        }, 150);
+      }
+    };
+    window.addEventListener("qa-genius:populate-log-analyzer", onPopulate);
+    return () => window.removeEventListener("qa-genius:populate-log-analyzer", onPopulate);
+  }, [handleAnalyze]);
 
   const handleClear = () => {
     setRawLogs("");
@@ -201,7 +213,7 @@ export default function LogAnalyzerTab() {
           {/* Action buttons */}
           <div className="flex gap-2">
             <button
-              onClick={handleAnalyze}
+              onClick={() => handleAnalyze()}
               disabled={!rawLogs.trim() || isAnalyzing}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium shadow-lg transition-all"
             >

@@ -80,7 +80,7 @@ export default function FailureAnalyzer({
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <McpSettingsButton onClick={() => setMcpModalOpen(true)} />
+            <McpSettingsButton onClick={() => setMcpModalOpen(true)} hasCoralogix={hasCoralogix} />
             <button
               type="button"
               onClick={handlePrimaryAction}

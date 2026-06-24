@@ -1,16 +1,16 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import {
-  History, FileCode2, Globe, FileText, ChevronDown, ChevronRight,
+  FileCode2, Globe, FileText, ChevronDown, ChevronRight,
   Loader2, Play, Eye, Trash2, RefreshCw, CalendarDays,
-  CheckCircle2, XCircle, Layers, Search, FlaskConical,
+  Layers, Search, FlaskConical,
   BrainCircuit, AlertTriangle, Wrench, ScrollText,
 } from "lucide-react";
 import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
 import { useLogHistory } from "../../hooks/useLogHistory";
-import { FeatureGroup, LogAnalysisRecord, RunTestResult, TestFileInfo } from "../../types";
+import { FeatureGroup, LogAnalysisRecord, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
-import { buildRunTestHeaders, consumeRunTestStream } from "../../lib/cloudRunner";
+import { routeRunToRepository } from "../../lib/cloudRunner";
 
 type HistoryView = "tests" | "logs";
 
@@ -33,41 +33,6 @@ function formatAbsoluteDate(iso: string): string {
   });
 }
 
-// ─── Inline run hook ──────────────────────────────────────────────────────────
-
-function useInlineRunner() {
-  const [results, setResults] = useState<Record<string, RunTestResult>>({});
-  const [running, setRunning] = useState<string | null>(null);
-  const [outputs, setOutputs] = useState<Record<string, string>>({});
-
-  const run = useCallback(async (file: TestFileInfo) => {
-    setRunning(file.relativePath);
-    setOutputs((p) => ({ ...p, [file.relativePath]: "" }));
-
-    try {
-      const res = await fetch("/api/run-test", {
-        method: "POST",
-        headers: buildRunTestHeaders(),
-        credentials: "include",
-        body: JSON.stringify({ relativePath: file.relativePath }),
-      });
-
-      await consumeRunTestStream(res, {
-        onOutput: (chunk) => setOutputs((p) => ({ ...p, [file.relativePath]: (p[file.relativePath] ?? "") + chunk })),
-        onResult: (data) => {
-          setResults((p) => ({ ...p, [file.relativePath]: data }));
-          setOutputs((p) => ({ ...p, [file.relativePath]: data.output ?? "" }));
-        },
-      });
-    } catch (e) {
-      setOutputs((p) => ({ ...p, [file.relativePath]: `Error: ${e instanceof Error ? e.message : "Unknown"}` }));
-    } finally {
-      setRunning(null);
-    }
-  }, []);
-
-  return { results, running, outputs, run };
-}
 
 // ─── Code view modal ──────────────────────────────────────────────────────────
 
@@ -112,25 +77,17 @@ function CodeModal({ file, onClose, isMockEntry = false }: { file: TestFileInfo;
 
 interface FeatureCardProps {
   group: FeatureGroup;
-  runner: ReturnType<typeof useInlineRunner>;
   onViewCode: (file: TestFileInfo, isMock: boolean) => void;
   onDeleteFeature: (slug: string) => void;
   isMock?: boolean;
 }
 
-function FeatureHistoryCard({ group, runner, onViewCode, onDeleteFeature, isMock = false }: FeatureCardProps) {
+function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false }: FeatureCardProps) {
   const [expanded, setExpanded] = useState(false);
   const { meta, tests } = group;
 
-  const passedCount = tests.filter((t) => runner.results[t.relativePath]?.status === "passed").length;
-  const failedCount = tests.filter((t) => runner.results[t.relativePath]?.status === "failed").length;
-  const hasRun = passedCount + failedCount > 0;
-
   return (
-    <div className={clsx(
-      "rounded-xl border overflow-hidden transition-all",
-      hasRun && failedCount === 0 ? "border-emerald-500/20" : hasRun && failedCount > 0 ? "border-red-500/20" : "border-surface-600"
-    )}>
+    <div className="rounded-xl border border-surface-600 overflow-hidden transition-all">
       {/* Card header */}
       <div className="flex items-start gap-4 p-5 bg-surface-800">
         {/* Type icon */}
@@ -163,12 +120,6 @@ function FeatureHistoryCard({ group, runner, onViewCode, onDeleteFeature, isMock
             )}>
               {meta.inputType === "swagger" ? "API Tests" : "UI Tests"}
             </span>
-            {hasRun && (
-              <div className="flex items-center gap-1.5 text-xs">
-                {passedCount > 0 && <span className="flex items-center gap-0.5 text-emerald-400"><CheckCircle2 className="w-3 h-3" />{passedCount} passed</span>}
-                {failedCount > 0 && <span className="flex items-center gap-0.5 text-red-400"><XCircle className="w-3 h-3" />{failedCount} failed</span>}
-              </div>
-            )}
           </div>
 
           {meta.description && (
@@ -223,74 +174,37 @@ function FeatureHistoryCard({ group, runner, onViewCode, onDeleteFeature, isMock
           {tests.length === 0 ? (
             <p className="text-xs text-slate-600 text-center py-4">No test files found</p>
           ) : (
-            tests.map((file) => {
-              const result = runner.results[file.relativePath];
-              const output = runner.outputs[file.relativePath];
-              const isThisRunning = runner.running === file.relativePath;
+            tests.map((file) => (
+              <div
+                key={file.relativePath}
+                className="rounded-lg border border-surface-600 bg-surface-800 p-3"
+              >
+                <div className="flex items-center gap-2">
+                  <FileCode2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                  <span className="text-xs font-mono text-slate-200 flex-1 truncate">{file.fileName}</span>
 
-              return (
-                <div
-                  key={file.relativePath}
-                  className={clsx(
-                    "rounded-lg border p-3 transition-all",
-                    isThisRunning ? "border-sky-500/30 bg-sky-500/5"
-                    : result?.status === "passed" ? "border-emerald-500/20 bg-emerald-500/5"
-                    : result?.status === "failed" ? "border-red-500/20 bg-red-500/5"
-                    : "border-surface-600 bg-surface-800"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    {isThisRunning ? <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin flex-shrink-0" />
-                    : result?.status === "passed" ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                    : result?.status === "failed" ? <XCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
-                    : <FileCode2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />}
-
-                    <span className="text-xs font-mono text-slate-200 flex-1 truncate">{file.fileName}</span>
-
-                    {result?.duration && (
-                      <span className="text-[10px] text-slate-600 flex-shrink-0">
-                        {(result.duration / 1000).toFixed(1)}s
-                      </span>
-                    )}
-
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => onViewCode(file, isMock)}
+                      title="View source code"
+                      className="p-1 rounded hover:bg-surface-600 text-slate-500 hover:text-slate-200 transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                    {!isMock && (
                       <button
-                        onClick={() => onViewCode(file, isMock)}
-                        title="View source code"
-                        className="p-1 rounded hover:bg-surface-600 text-slate-500 hover:text-slate-200 transition-colors"
+                        onClick={() => routeRunToRepository(file)}
+                        title="Run in Test Repository"
+                        className="flex items-center gap-1 px-2 py-1 bg-emerald-600/80 hover:bg-emerald-600 text-white rounded text-[10px] font-medium transition-colors"
                       >
-                        <Eye className="w-3.5 h-3.5" />
+                        <Play className="w-2.5 h-2.5 fill-white" />
+                        Run
                       </button>
-                      {!isMock && (
-                        <button
-                          onClick={() => runner.run(file)}
-                          disabled={!!runner.running}
-                          title="Run test locally"
-                          className="flex items-center gap-1 px-2 py-1 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-40 text-white rounded text-[10px] font-medium transition-colors"
-                        >
-                          {isThisRunning ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Play className="w-2.5 h-2.5 fill-white" />}
-                          Run
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
-
-                  {/* Inline output snippet */}
-                  {output && (
-                    <div className="mt-2 bg-surface-900 rounded p-2 max-h-24 overflow-y-auto">
-                      <pre className="text-[10px] font-mono leading-4 whitespace-pre-wrap">
-                        {output.split("\n").map((line, i) => (
-                          <span key={i} className={
-                            /✓|passed/i.test(line) ? "text-emerald-400" :
-                            /✗|failed|error/i.test(line) ? "text-red-400" : "text-slate-400"
-                          }>{line + "\n"}</span>
-                        ))}
-                      </pre>
-                    </div>
-                  )}
                 </div>
-              );
-            })
+              </div>
+            ))
           )}
         </div>
       )}
@@ -406,7 +320,6 @@ export default function HistoryTab() {
     refresh: refreshLogs,
     deleteAnalysis,
   } = useLogHistory();
-  const runner = useInlineRunner();
   const [codeViewFile, setCodeViewFile] = useState<{ file: TestFileInfo; isMock: boolean } | null>(null);
   const [search, setSearch] = useState("");
 
@@ -537,7 +450,6 @@ export default function HistoryTab() {
               <FeatureHistoryCard
                 key={group.meta.slug}
                 group={group}
-                runner={runner}
                 isMock={showMockData}
                 onViewCode={(file, isMock) => setCodeViewFile({ file, isMock })}
                 onDeleteFeature={(slug) => {

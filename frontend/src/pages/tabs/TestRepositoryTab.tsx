@@ -6,9 +6,11 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
+import { useAuth } from "../../hooks/useAuth";
 import { FeatureGroup, RunTestResult, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
-import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, fetchCloudRunLogs, requireGitHubTokenForCloudRun } from "../../lib/cloudRunner";
+import { buildRunTestHeaders, consumeRunTestStream, pollCloudRunStatus, fetchCloudRunLogs, requireGitHubTokenForCloudRun, routeFailureLogsToAnalyzer } from "../../lib/cloudRunner";
+import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 
 function formatBytes(b: number) {
   return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
@@ -217,6 +219,7 @@ function FeatureCard({
 
 export default function TestRepositoryTab() {
   const { features: realFeatures, isLoading, error, refresh, deleteTest, deleteFeature } = useTestRepository();
+  const { user } = useAuth();
 
   const [selectedTest, setSelectedTest] = useState<{ file: TestFileInfo; isMock: boolean } | null>(null);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
@@ -227,6 +230,7 @@ export default function TestRepositoryTab() {
   const [liveProgress, setLiveProgress] = useState(0);
   const [liveStatus, setLiveStatus] = useState("");
   const consoleRef = useRef<HTMLDivElement>(null);
+  const pendingRunRef = useRef(false);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -266,6 +270,21 @@ export default function TestRepositoryTab() {
 
   const showMockData = !isLoading && !error && realFeatures.length === 0;
   const features: FeatureGroup[] = showMockData ? MOCK_FEATURES : realFeatures;
+
+  // Listen for run requests from the History tab
+  useEffect(() => {
+    const onRunInRepository = (event: Event) => {
+      const file = (event as CustomEvent<{ file: TestFileInfo }>).detail?.file;
+      if (!file) return;
+      pendingRunRef.current = true;
+      setSelectedTest({ file, isMock: false });
+      setLiveOutput("");
+      setLiveProgress(0);
+      setLiveStatus("");
+    };
+    window.addEventListener("qa-genius:run-test-in-repository", onRunInRepository);
+    return () => window.removeEventListener("qa-genius:run-test-in-repository", onRunInRepository);
+  }, []);
 
   const handleSelect = useCallback((file: TestFileInfo) => {
     setSelectedTest({ file, isMock: showMockData });
@@ -367,6 +386,15 @@ export default function TestRepositoryTab() {
       setRunningPath(null);
       setLiveStatus("");
     }
+  }, [selectedTest]);
+
+  // Fire run after a cross-tab select (from History)
+  useEffect(() => {
+    if (pendingRunRef.current && selectedTest) {
+      pendingRunRef.current = false;
+      handleRun();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTest]);
 
   const handleDelete = (file: TestFileInfo) => {
@@ -548,6 +576,32 @@ export default function TestRepositoryTab() {
                 {isRunning && <span className="inline-block w-2 h-3 bg-sky-400 animate-pulse mt-1" />}
               </div>
             </div>
+
+            {/* Failure banner — same UX as Test Generator */}
+            {selectedResult?.status === "failed" && !isRunning && (
+              <div className="flex-shrink-0 px-4 pb-4">
+                <FailureAnalyzer
+                  errorDetails={selectedResult.errorDetails ?? ""}
+                  failureLog={selectedResult.rawLogs ?? selectedResult.output ?? liveOutput}
+                  testCode={previewCode ?? ""}
+                  hasCoralogix={!!user?.hasCoralogix}
+                  onAnalyze={() => routeFailureLogsToAnalyzer(
+                    selectedResult.rawLogs ?? selectedResult.output ?? liveOutput,
+                    "playwright"
+                  )}
+                  onAnalyzeWithGitHubLogs={() => routeFailureLogsToAnalyzer(
+                    selectedResult.rawLogs ?? selectedResult.output ?? liveOutput,
+                    "playwright"
+                  )}
+                  onOpenSettings={() =>
+                    window.dispatchEvent(new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "settings" } }))
+                  }
+                  isAnalyzing={false}
+                  mcpSteps={[]}
+                  analysis={null}
+                />
+              </div>
+            )}
           </>
         )}
       </div>

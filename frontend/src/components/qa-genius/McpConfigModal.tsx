@@ -105,15 +105,23 @@ export default function McpConfigModal({
   );
 }
 
-export function McpSettingsButton({ onClick }: { onClick: () => void }) {
+export function McpSettingsButton({ onClick, hasCoralogix }: { onClick: () => void; hasCoralogix?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      title="MCP log analysis settings"
-      className="p-1.5 rounded-lg border border-surface-600 bg-surface-800 hover:bg-surface-700 text-slate-400 hover:text-slate-200 transition-colors"
+      title="Configure Coralogix MCP Integration"
+      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-surface-600 bg-surface-800 hover:bg-surface-700 text-slate-400 hover:text-slate-200 transition-colors"
     >
       <Settings className="w-3.5 h-3.5" />
+      <span className="text-[9px] font-bold uppercase tracking-wider">MCP</span>
+      <span
+        className={clsx(
+          "w-1.5 h-1.5 rounded-full flex-shrink-0",
+          hasCoralogix ? "bg-emerald-400" : "bg-amber-400"
+        )}
+        title={hasCoralogix ? "Coralogix connected" : "Coralogix not configured"}
+      />
     </button>
   );
 }

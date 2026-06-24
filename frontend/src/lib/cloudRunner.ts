@@ -114,16 +114,26 @@ export function requireGitHubTokenForCloudRun(): string | null {
   return readGitHubTokenForRequest();
 }
 
-/** Navigate to Log Analyzer with pre-filled GitHub failure logs. */
+/** Navigate to Log Analyzer with pre-filled GitHub failure logs and auto-trigger analysis. */
 export function routeFailureLogsToAnalyzer(logs: string, source = "playwright"): void {
   window.dispatchEvent(
     new CustomEvent("qa-genius:populate-log-analyzer", {
-      detail: { logs, source },
+      detail: { logs, source, autoTrigger: true },
     })
   );
   window.dispatchEvent(
     new CustomEvent("qa-genius:navigate-tab", {
       detail: { tab: "analyzer" },
     })
+  );
+}
+
+/** Route to Test Repository tab and select + run a specific test file. */
+export function routeRunToRepository(file: { relativePath: string; featureSlug: string; fileName: string; sizeBytes: number; modifiedAt: string }): void {
+  window.dispatchEvent(
+    new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "repository" } })
+  );
+  window.dispatchEvent(
+    new CustomEvent("qa-genius:run-test-in-repository", { detail: { file } })
   );
 }
