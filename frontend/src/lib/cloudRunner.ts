@@ -1,9 +1,10 @@
-import { RunTestResult } from "../types";
+import { RunTestResult, TestFileInfo, InputType } from "../types";
 import { buildGitHubTokenHeaders, readGitHubTokenForRequest } from "./githubToken";
 import { finishTestRun, mapResultStatus } from "./testRuns";
 import { fetchRunArtifacts } from "./artifacts";
 
 const ANALYZER_PENDING_KEY = "qa-genius:pending-analyzer";
+const GENERATOR_PENDING_KEY = "qa-genius:pending-generator-run";
 
 /** Poll every ~4.5s for up to ~15 minutes (matches workflow timeout). */
 export const CLOUD_RUN_POLL = {
@@ -15,6 +16,16 @@ export interface AnalyzerRoutePayload {
   logs: string;
   source: string;
   autoTrigger: boolean;
+  ts: number;
+}
+
+/** Payload for loading a saved repository test into Test Generator and optionally auto-running. */
+export interface RunInGeneratorPayload {
+  file: TestFileInfo;
+  code?: string;
+  isMock?: boolean;
+  inputType?: InputType;
+  autoRun?: boolean;
   ts: number;
 }
 
@@ -89,21 +100,27 @@ export async function persistRunCompletion(
 ): Promise<void> {
   if (!testRunId || result.status === "running") return;
 
+  // Artifact fetch is best-effort — a failure must NEVER prevent the run
+  // from being finalized in Supabase (which would leave it stuck at RUNNING).
   let artifactMeta: Record<string, unknown> | null = null;
   if (result.status === "failed" && result.cloudRunId) {
-    const gallery = await fetchRunArtifacts(result.cloudRunId);
-    if (gallery) {
-      artifactMeta = {
-        artifactCount: gallery.artifacts.length,
-        screenshotCount: gallery.screenshots.length,
-        artifactNames: gallery.artifacts.map((a) => a.name),
-      };
+    try {
+      const gallery = await fetchRunArtifacts(result.cloudRunId);
+      if (gallery) {
+        artifactMeta = {
+          artifactCount: gallery.artifacts.length,
+          screenshotCount: gallery.screenshots.length,
+          artifactNames: gallery.artifacts.map((a) => a.name),
+        };
+      }
+    } catch (err) {
+      console.warn("[persistRunCompletion] artifact fetch failed (non-fatal):", err);
     }
   }
 
   await finishTestRun(testRunId, {
     status: mapResultStatus(result.status),
-    durationMs: result.duration,
+    ...(result.duration > 0 ? { durationMs: result.duration } : {}),
     gitHubRunId: result.cloudRunId,
     htmlUrl: result.htmlUrl,
     runner: result.runner,
@@ -118,12 +135,23 @@ export async function waitForCloudRunCompletion(
     onProgress?: (message: string, progress: number) => void;
     onOutput?: (output: string) => void;
   },
-  options?: { maxAttempts?: number; delayMs?: number }
+  options?: { maxAttempts?: number; delayMs?: number; signal?: AbortSignal }
 ): Promise<RunTestResult> {
   const maxAttempts = options?.maxAttempts ?? CLOUD_RUN_POLL.maxAttempts;
   const delayMs = options?.delayMs ?? CLOUD_RUN_POLL.delayMs;
 
   for (let i = 0; i < maxAttempts; i++) {
+    if (options?.signal?.aborted) {
+      return {
+        testId: String(workflowRunId),
+        status: "failed",
+        output: "Run stopped by user.",
+        duration: 0,
+        cloudRunId: workflowRunId,
+        runner: "github-actions",
+      };
+    }
+
     const status = await pollCloudRunStatus(workflowRunId);
     handlers?.onOutput?.(status.output);
 
@@ -230,7 +258,7 @@ export async function resolveCloudRunAfterStream(
     onProgress?: (message: string, progress: number) => void;
     onOutput?: (output: string) => void;
   },
-  options?: { dispatchedAt?: number; testRunId?: string }
+  options?: { dispatchedAt?: number; testRunId?: string; signal?: AbortSignal }
 ): Promise<RunTestResult | null> {
   let runId = streamResult?.cloudRunId ?? workflowRunId;
 
@@ -245,7 +273,10 @@ export async function resolveCloudRunAfterStream(
       !streamResult);
 
   if (isCloudRun && runId) {
-    const result = await waitForCloudRunCompletion(runId, handlers, CLOUD_RUN_POLL);
+    const result = await waitForCloudRunCompletion(runId, handlers, {
+      ...CLOUD_RUN_POLL,
+      signal: options?.signal,
+    });
     return { ...result, testRunId: options?.testRunId ?? streamResult?.testRunId };
   }
 
@@ -263,13 +294,21 @@ export interface ExecuteTestRunHandlers {
   onOutputAppend?: (chunk: string) => void;
   onOutputReplace?: (text: string) => void;
   onResult?: (result: RunTestResult) => void;
+  onTestRunId?: (testRunId: string) => void;
+}
+
+export interface ExecuteTestRunOptions {
+  signal?: AbortSignal;
 }
 
 /** Unified run flow — used by Generator and Repository tabs. */
 export async function executeTestRun(
   body: Record<string, unknown>,
-  handlers: ExecuteTestRunHandlers
+  handlers: ExecuteTestRunHandlers,
+  options?: ExecuteTestRunOptions
 ): Promise<RunTestResult | null> {
+  if (options?.signal?.aborted) return null;
+
   if (shouldUseGitHubCloudRunner() && !requireGitHubTokenForCloudRun()) {
     handlers.onOutputAppend?.(
       "Error: Add a GitHub PAT in Settings → Cloud Test Runner to run tests via GitHub Actions.\n"
@@ -283,14 +322,25 @@ export async function executeTestRun(
     headers: buildRunTestHeaders(),
     credentials: "include",
     body: JSON.stringify(body),
+    signal: options?.signal,
   });
+
+  if (options?.signal?.aborted) return null;
 
   const { pendingWorkflowRunId, streamResult, testRunId, dispatchStartedAt } =
     await consumeRunTestStream(res, {
       onStatus: handlers.onStatus,
       onOutput: handlers.onOutputAppend,
       onResult: handlers.onResult,
+      onTestRunId: handlers.onTestRunId,
     });
+
+  if (options?.signal?.aborted) {
+    if (testRunId) {
+      await finishTestRun(testRunId, { status: "FAILED" });
+    }
+    return null;
+  }
 
   const finalResult = await resolveCloudRunAfterStream(
     streamResult,
@@ -302,8 +352,17 @@ export async function executeTestRun(
     {
       dispatchedAt: dispatchStartedAt ?? streamStartedAt,
       testRunId,
+      signal: options?.signal,
     }
   );
+
+  if (options?.signal?.aborted) {
+    const cancelledId = finalResult?.testRunId ?? testRunId;
+    if (cancelledId) {
+      await finishTestRun(cancelledId, { status: "FAILED" });
+    }
+    return null;
+  }
 
   if (!finalResult) return null;
 
@@ -355,6 +414,7 @@ export async function consumeRunTestStream(
     onOutput?: (chunk: string) => void;
     onResult?: (result: RunTestResult) => void;
     onWorkflowRunId?: (workflowRunId: number) => void;
+    onTestRunId?: (testRunId: string) => void;
   }
 ): Promise<{
   pendingWorkflowRunId?: number;
@@ -392,6 +452,7 @@ export async function consumeRunTestStream(
           handlers.onStatus?.(data.message ?? "", data.progress ?? 0);
         } else if (eventType === "started" && data.testRunId) {
           testRunId = String(data.testRunId);
+          handlers.onTestRunId?.(testRunId);
         } else if (eventType === "output") {
           handlers.onOutput?.(data.text ?? "");
         } else if (eventType === "result") {
@@ -401,11 +462,17 @@ export async function consumeRunTestStream(
         } else if (eventType === "dispatched" && data.workflowRunId) {
           handlers.onWorkflowRunId?.(Number(data.workflowRunId));
           pendingWorkflowRunId = Number(data.workflowRunId);
-          if (data.testRunId) testRunId = String(data.testRunId);
+          if (data.testRunId) {
+            testRunId = String(data.testRunId);
+            handlers.onTestRunId?.(testRunId);
+          }
           if (data.dispatchedAt) dispatchStartedAt = Number(data.dispatchedAt);
         } else if (eventType === "pending") {
           if (data.dispatchedAt) dispatchStartedAt = Number(data.dispatchedAt);
-          if (data.testRunId) testRunId = String(data.testRunId);
+          if (data.testRunId) {
+            testRunId = String(data.testRunId);
+            handlers.onTestRunId?.(testRunId);
+          }
           handlers.onStatus?.(
             String(data.message ?? "Resolving GitHub run ID…"),
             22
@@ -469,18 +536,40 @@ export function routeFailureLogsToAnalyzer(logs: string, source = "playwright"):
   });
 }
 
-/** Route to Test Repository tab and select + run a specific test file. */
-export function routeRunToRepository(file: {
-  relativePath: string;
-  featureSlug: string;
-  fileName: string;
-  sizeBytes: number;
-  modifiedAt: string;
-}): void {
+/** Load a saved test into Test Generator and optionally auto-start execution. */
+export function routeRunToGenerator(
+  payload: Omit<RunInGeneratorPayload, "ts">
+): void {
+  const full: RunInGeneratorPayload = {
+    ...payload,
+    autoRun: payload.autoRun ?? true,
+    ts: Date.now(),
+  };
+
+  sessionStorage.setItem(GENERATOR_PENDING_KEY, JSON.stringify(full));
   window.dispatchEvent(
-    new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "repository" } })
+    new CustomEvent("qa-genius:run-test-in-generator", { detail: full })
   );
-  window.dispatchEvent(
-    new CustomEvent("qa-genius:run-test-in-repository", { detail: { file } })
-  );
+
+  queueMicrotask(() => {
+    window.dispatchEvent(
+      new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "generator" } })
+    );
+  });
+}
+
+export function readPendingGeneratorRun(): RunInGeneratorPayload | null {
+  try {
+    const raw = sessionStorage.getItem(GENERATOR_PENDING_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(GENERATOR_PENDING_KEY);
+    return JSON.parse(raw) as RunInGeneratorPayload;
+  } catch {
+    return null;
+  }
+}
+
+/** @deprecated Use routeRunToGenerator — runs now execute in Test Generator for full-width terminal. */
+export function routeRunToRepository(file: TestFileInfo): void {
+  routeRunToGenerator({ file, autoRun: true });
 }

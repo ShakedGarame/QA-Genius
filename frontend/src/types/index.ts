@@ -53,8 +53,14 @@ export interface TestRunRecord {
 
 export interface DashboardStats {
   totalRuns: number;
-  passRatePercent: number;
-  averageDurationMs: number;
+  completedRuns: number;
+  runningRuns: number;
+  passedRuns: number;
+  failedRuns: number;
+  /** null = no completed runs yet (show N/A instead of 0%) */
+  passRatePercent: number | null;
+  /** null = no runs with recorded duration (show N/A) */
+  averageDurationMs: number | null;
   recentRuns: TestRunRecord[];
 }
 
@@ -133,6 +139,8 @@ export interface FeatureMeta {
   updatedAt: string;
   description?: string;
   prdText?: string;
+  /** Latest test execution status for this feature, if any */
+  latestRunStatus?: TestRunStatus | null;
 }
 
 export interface FeatureGroup {

@@ -1,65 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { ExternalLink, ImageIcon, Loader2, Package, RefreshCw, X, ZoomIn } from "lucide-react";
+import { ExternalLink, ImageIcon, Loader2, Package, RefreshCw, ZoomIn } from "lucide-react";
 import clsx from "clsx";
 import { fetchRunArtifacts } from "../../lib/artifacts";
 import type { RunArtifactGallery } from "../../types";
-
-// ── Lightbox ──────────────────────────────────────────────────────────────────
-
-interface LightboxProps {
-  src: string;
-  name: string;
-  onClose: () => void;
-}
-
-function Lightbox({ src, name, onClose }: LightboxProps) {
-  // Close on Escape key
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      {/* Stop click from propagating so clicking the image itself doesn't close */}
-      <div
-        className="relative max-w-4xl w-full"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Close button */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute -top-10 right-0 flex items-center gap-1.5 text-slate-300 hover:text-white text-sm transition-colors"
-          aria-label="Close"
-        >
-          <X className="w-5 h-5" />
-          <span>Close</span>
-        </button>
-
-        {/* Screenshot filename */}
-        <p className="absolute -top-10 left-0 text-slate-400 text-xs font-mono truncate max-w-[70%]">
-          {name}
-        </p>
-
-        {/* Full-res image */}
-        <img
-          src={src}
-          alt={name}
-          className="w-full h-auto rounded-lg shadow-2xl border border-white/10"
-        />
-      </div>
-    </div>,
-    document.body
-  );
-}
+import FullscreenModal from "../ui/FullscreenModal";
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
@@ -84,6 +28,9 @@ export default function ArtifactsGallery({
   const [attempt, setAttempt] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const openLightbox = (src: string, name: string) => setLightbox({ src, name });
+  const closeLightbox = () => setLightbox(null);
+
   const load = useCallback(async () => {
     if (!cloudRunId) return;
     console.log("[ArtifactsGallery] Fetching artifacts for cloudRunId:", cloudRunId);
@@ -100,7 +47,7 @@ export default function ArtifactsGallery({
     if (!enabled || !cloudRunId) {
       setGallery(null);
       setSelectedShot(null);
-      setLightbox(null);
+      closeLightbox();
       setAttempt(0);
       return;
     }
@@ -133,14 +80,36 @@ export default function ArtifactsGallery({
   const hasScreenshots = (gallery?.screenshots.length ?? 0) > 0;
   const hasArtifacts = (gallery?.artifacts.length ?? 0) > 0;
 
-  const openLightbox = (src: string, name: string) => setLightbox({ src, name });
-  const closeLightbox = () => setLightbox(null);
+  // Shared lightbox rendered once — shown for both layouts
+  const lightboxModal = (
+    <FullscreenModal
+      open={Boolean(lightbox)}
+      onClose={closeLightbox}
+      title={
+        <span className="flex items-center gap-2">
+          <ImageIcon className="w-4 h-4 text-violet-400" />
+          <span className="text-slate-300 font-mono text-xs truncate">{lightbox?.name ?? "Screenshot"}</span>
+        </span>
+      }
+      innerClassName="max-w-5xl h-auto max-h-[85vh]"
+    >
+      {lightbox && (
+        <div className="flex items-center justify-center h-full -m-6">
+          <img
+            src={lightbox.src}
+            alt={lightbox.name}
+            className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl"
+          />
+        </div>
+      )}
+    </FullscreenModal>
+  );
 
   // ── Row layout (below terminal in Generator) ────────────────────────────────
   if (layout === "row") {
     return (
       <>
-        {lightbox && <Lightbox src={lightbox.src} name={lightbox.name} onClose={closeLightbox} />}
+        {lightboxModal}
 
         <div className="rounded-xl border border-surface-600 bg-surface-800/50 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700 bg-surface-800">
@@ -234,7 +203,7 @@ export default function ArtifactsGallery({
   // ── Col layout (side panel in Repository) ───────────────────────────────────
   return (
     <>
-      {lightbox && <Lightbox src={lightbox.src} name={lightbox.name} onClose={closeLightbox} />}
+      {lightboxModal}
 
       <div className="flex flex-col h-full border-l border-surface-600 bg-surface-900/60 min-w-0">
         <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700 bg-surface-800/40">

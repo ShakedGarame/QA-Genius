@@ -2,6 +2,9 @@
 
 > A production-grade portfolio project for a QA Automation Engineer.
 
+**Live app:** [https://project-bh2e7.vercel.app](https://project-bh2e7.vercel.app)  
+**Repository:** [https://github.com/ShakedGarame/QA-Genius](https://github.com/ShakedGarame/QA-Genius)
+
 ## What it does
 
 | Feature | Description |

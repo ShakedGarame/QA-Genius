@@ -16,6 +16,35 @@ export interface WorkflowRunInfo {
   conclusion: string | null;
   htmlUrl: string;
   createdAt: string;
+  updatedAt: string;
+  runStartedAt: string | null;
+}
+
+/** Elapsed workflow time from GitHub timestamps (updated_at − run_started_at). */
+export function computeWorkflowDurationMs(
+  run: Pick<WorkflowRunInfo, "createdAt" | "updatedAt" | "runStartedAt" | "status">,
+  nowMs = Date.now()
+): number {
+  const startMs = new Date(run.runStartedAt ?? run.createdAt).getTime();
+  const isTerminal = run.status === "completed" || run.status === "cancelled";
+  const endMs =
+    run.updatedAt && isTerminal
+      ? new Date(run.updatedAt).getTime()
+      : nowMs;
+  const duration = endMs - startMs;
+  return duration > 0 ? duration : 0;
+}
+
+function mapWorkflowRun(row: Record<string, unknown>): WorkflowRunInfo {
+  return {
+    id: Number(row.id),
+    status: String(row.status ?? "unknown"),
+    conclusion: (row.conclusion as string | null) ?? null,
+    htmlUrl: String(row.html_url ?? ""),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? row.created_at ?? ""),
+    runStartedAt: row.run_started_at ? String(row.run_started_at) : null,
+  };
 }
 
 export interface CloudRunStatus {
@@ -96,13 +125,7 @@ export async function findDispatchRun(
 
   if (!match) return null;
 
-  return {
-    id: Number(match.id),
-    status: String(match.status ?? "queued"),
-    conclusion: (match.conclusion as string | null) ?? null,
-    htmlUrl: String(match.html_url ?? ""),
-    createdAt: String(match.created_at ?? ""),
-  };
+  return mapWorkflowRun(match);
 }
 
 export async function getWorkflowRun(token: string, runId: number): Promise<WorkflowRunInfo> {
@@ -112,13 +135,7 @@ export async function getWorkflowRun(token: string, runId: number): Promise<Work
     `/repos/${owner}/${repo}/actions/runs/${runId}`
   );
 
-  return {
-    id: Number(run.id),
-    status: String(run.status ?? "unknown"),
-    conclusion: (run.conclusion as string | null) ?? null,
-    htmlUrl: String(run.html_url ?? ""),
-    createdAt: String(run.created_at ?? ""),
-  };
+  return mapWorkflowRun(run);
 }
 
 export async function fetchRawWorkflowLogs(token: string, runId: number): Promise<string> {
@@ -320,7 +337,7 @@ export async function waitForWorkflowCompletion(
         htmlUrl: run.htmlUrl,
         output: built.output,
         rawLogs: built.rawLogs,
-        durationMs: Date.now() - startedAtMs,
+        durationMs: computeWorkflowDurationMs(run),
         passed,
       };
     }
@@ -339,7 +356,7 @@ export async function waitForWorkflowCompletion(
       `Track progress: ${run.htmlUrl}\n` +
       `Re-check status from the app or GitHub Actions tab.`,
     rawLogs: "",
-    durationMs: Date.now() - startedAtMs,
+    durationMs: computeWorkflowDurationMs(run),
     passed: false,
   };
 }
@@ -348,8 +365,8 @@ export async function resolveCloudRunStatus(
   token: string,
   runId: number
 ): Promise<CloudRunStatus> {
-  const startedAtMs = Date.now();
   const run = await getWorkflowRun(token, runId);
+  const durationMs = computeWorkflowDurationMs(run);
 
   if (run.status !== "completed") {
     return {
@@ -359,7 +376,7 @@ export async function resolveCloudRunStatus(
       htmlUrl: run.htmlUrl,
       output: `Cloud run is ${run.status}. Track: ${run.htmlUrl}`,
       rawLogs: "",
-      durationMs: 0,
+      durationMs,
       passed: false,
     };
   }
@@ -374,7 +391,7 @@ export async function resolveCloudRunStatus(
     htmlUrl: run.htmlUrl,
     output: built.output,
     rawLogs: built.rawLogs,
-    durationMs: Date.now() - startedAtMs,
+    durationMs,
     passed,
     errorDetails: built.errorDetails,
   };

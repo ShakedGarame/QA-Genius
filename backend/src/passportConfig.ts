@@ -2,7 +2,7 @@ import passport from "passport";
 import { Strategy as GitHubStrategy, Profile as GitHubProfile } from "passport-github2";
 import { Strategy as GoogleStrategy, Profile as GoogleProfile } from "passport-google-oauth20";
 import { VerifyCallback } from "passport-oauth2";
-import { findUserById, upsertGithubUser, upsertGoogleUser, buildLocalDevGuest } from "./db.js";
+import { findUserById, upsertGithubUser, upsertGoogleUser, buildLocalDevGuest, getOrCreateGuestUser } from "./db.js";
 
 const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
 
@@ -14,12 +14,26 @@ passport.deserializeUser(async (id: string, done) => {
   try {
     const user = await findUserById(id);
     if (user) return done(null, user);
+
     if (!isProduction && id === buildLocalDevGuest().id) {
+      try {
+        const guest = await getOrCreateGuestUser();
+        if (guest.id !== buildLocalDevGuest().id) return done(null, guest);
+      } catch {
+        // DB still offline — fall back to in-memory guest (read-only flows)
+      }
       return done(null, buildLocalDevGuest());
     }
+
     done(null, false);
   } catch (err) {
     if (!isProduction && id === buildLocalDevGuest().id) {
+      try {
+        const guest = await getOrCreateGuestUser();
+        if (guest.id !== buildLocalDevGuest().id) return done(null, guest);
+      } catch {
+        // ignore
+      }
       return done(null, buildLocalDevGuest());
     }
     done(err);

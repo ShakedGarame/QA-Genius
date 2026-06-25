@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import {
   Play, Loader2, Sparkles, FileCode2, AlertCircle,
   CheckCircle2, RotateCcw, Save, Upload, FileText,
-  Code2, Globe, Tag, X,
+  Code2, Globe, Tag, X, Square,
 } from "lucide-react";
 import clsx from "clsx";
 import StoryPanel from "../../components/qa-genius/StoryPanel";
@@ -14,8 +14,10 @@ import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 import { useTestRunner } from "../../hooks/useTestRunner";
 import { useAuth } from "../../hooks/useAuth";
 import { buildOpenAIKeyHeaders, readOpenAIKeyForRequest } from "../../lib/apiKeys";
-import { routeFailureLogsToAnalyzer, getActionableFailureLogs } from "../../lib/cloudRunner";
+import { routeFailureLogsToAnalyzer, getActionableFailureLogs, readPendingGeneratorRun, type RunInGeneratorPayload } from "../../lib/cloudRunner";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
+import { MOCK_CODE_MAP } from "../../data/mockData";
+import { SidebarPanel, PanelBody, EmptyState } from "../../components/ui/layout";
 
 // ─── Feature Name Input ───────────────────────────────────────────────────────
 
@@ -351,9 +353,77 @@ export default function TestGeneratorTab() {
 
   const {
     isRunning, output, progress, statusMessage, result: runResult,
-    runTest, isAnalyzing, mcpSteps, analysis, analyzeFailure,
+    runTest, stopTest, isAnalyzing, mcpSteps, analysis, analyzeFailure,
   } = useTestRunner();
   const { user } = useAuth();
+  const lastAppliedRunTs = useRef(0);
+
+  const applyRunPayload = useCallback(
+    async (detail: RunInGeneratorPayload) => {
+      if (detail.ts <= lastAppliedRunTs.current) return;
+      lastAppliedRunTs.current = detail.ts;
+
+      const { file, isMock, inputType: incomingType, autoRun = true } = detail;
+      let code = detail.code;
+
+      if (!code) {
+        if (isMock) {
+          code = MOCK_CODE_MAP[file.relativePath];
+        } else {
+          try {
+            const res = await fetch(
+              `/api/tests/${encodeURIComponent(file.featureSlug)}/${encodeURIComponent(file.fileName)}`,
+              { credentials: "include" }
+            );
+            const json = await res.json();
+            code = json.code ?? "";
+          } catch {
+            code = "";
+          }
+        }
+      }
+
+      if (!code?.trim()) return;
+
+      setFeatureName(file.featureName);
+      setFeatureNameSaved(true);
+      setFeatureNameError("");
+      if (incomingType) setInputType(incomingType);
+      setEditedCode(code);
+      setSavedAs(file.fileName);
+      setFeatureSlug(file.featureSlug);
+      setGenResult({
+        code,
+        userStories: [],
+        model: "repository",
+        isMock: isMock ?? false,
+        savedAs: file.fileName,
+        featureSlug: file.featureSlug,
+      });
+      setGenError(null);
+      setStage("generated");
+
+      if (autoRun) {
+        await runTest({ code, relativePath: file.relativePath });
+        setStage("executed");
+      }
+    },
+    [runTest]
+  );
+
+  useEffect(() => {
+    const pending = readPendingGeneratorRun();
+    if (pending) void applyRunPayload(pending);
+  }, [applyRunPayload]);
+
+  useEffect(() => {
+    const onRunInGenerator = (event: Event) => {
+      const detail = (event as CustomEvent<RunInGeneratorPayload>).detail;
+      if (detail?.file) void applyRunPayload(detail);
+    };
+    window.addEventListener("qa-genius:run-test-in-generator", onRunInGenerator);
+    return () => window.removeEventListener("qa-genius:run-test-in-generator", onRunInGenerator);
+  }, [applyRunPayload]);
 
   const handleSaveFeatureName = () => {
     if (!featureName.trim()) {
@@ -466,7 +536,9 @@ export default function TestGeneratorTab() {
   const handleRun = async () => {
     const code = editedCode || genResult?.code || "";
     if (!code) return;
-    await runTest(code);
+    const relativePath =
+      featureSlug && savedAs ? `${featureSlug}/${savedAs}` : undefined;
+    await runTest(relativePath ? { code, relativePath } : code);
     setStage("executed");
   };
 
@@ -507,8 +579,8 @@ export default function TestGeneratorTab() {
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Left config panel ── */}
-      <div className="w-80 flex-shrink-0 border-r border-surface-600 flex flex-col bg-surface-800/30">
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <SidebarPanel width="w-80">
+        <PanelBody className="p-4 space-y-4">
           {/* Stage breadcrumb */}
           <div className="flex items-center gap-1">
             {stageList.map((s, i) => (
@@ -578,10 +650,10 @@ export default function TestGeneratorTab() {
               </div>
             </div>
           )}
-        </div>
 
         {/* Generate button — only show once feature name is saved */}
-        {featureNameSaved && <div className="p-4 border-t border-surface-600 space-y-2 flex-shrink-0">
+        {featureNameSaved && (
+          <div className="pt-4 border-t border-surface-600 space-y-2 flex-shrink-0">
           {savedAs && (
             <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2.5 py-1.5">
               <Save className="w-3 h-3 flex-shrink-0" />
@@ -617,23 +689,25 @@ export default function TestGeneratorTab() {
               <AlertCircle className="w-3.5 h-3.5" /> {genError}
             </p>
           )}
-        </div>}
-      </div>
+          </div>
+        )}
+        </PanelBody>
+      </SidebarPanel>
 
       {/* ── Right area: editor + console ── */}
-      <div className="flex-1 min-w-0 flex flex-col p-4 gap-4 overflow-auto">
+      <div className="qa-main-pane p-6 gap-4 overflow-auto flex flex-col">
         {!genResult && !isGenerating && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-600 space-y-3">
-            <FileCode2 className="w-14 h-14 opacity-20" />
-            <div>
-              <p className="text-slate-500 font-medium">No tests generated yet</p>
-              <p className="text-sm mt-1">
-                {inputType === "swagger"
-                  ? "Provide an OpenAPI spec and click Generate API Tests"
-                  : "Enter a Feature Name, upload a PRD, and click Generate UI Tests"}
-              </p>
-            </div>
-          </div>
+          <EmptyState
+            icon={FileCode2}
+            accent="sky"
+            title="No tests generated yet"
+            description={
+              inputType === "swagger"
+                ? "Provide an OpenAPI spec and click Generate API Tests to create integration tests."
+                : "Enter a feature name, upload a PRD, and click Generate UI Tests to create Playwright tests."
+            }
+            hint="Follow the steps in the left panel: Configure → Generate → Execute."
+          />
         )}
 
         {isGenerating && (
@@ -679,14 +753,33 @@ export default function TestGeneratorTab() {
                   {inputType === "swagger" ? "API" : "UI"}
                 </span>
               </div>
-              <button
-                onClick={handleRun}
-                disabled={isRunning}
-                className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-white" />}
-                {isRunning ? "Running…" : "Run Test"}
-              </button>
+              <div className="flex items-center gap-2">
+                {isRunning ? (
+                  <>
+                    <span className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium select-none">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Running…
+                    </span>
+                    <button
+                      type="button"
+                      onClick={stopTest}
+                      title="Stop run"
+                      className="flex items-center justify-center w-9 h-9 rounded-lg text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 transition-colors"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleRun}
+                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <Play className="w-4 h-4 fill-white" />
+                    Run Test
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex-1 min-h-0 grid grid-cols-2 gap-4" style={{ minHeight: "400px" }}>

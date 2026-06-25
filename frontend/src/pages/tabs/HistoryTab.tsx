@@ -8,9 +8,19 @@ import {
 import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
 import { useLogHistory } from "../../hooks/useLogHistory";
-import { FeatureGroup, LogAnalysisRecord, TestFileInfo } from "../../types";
+import { FeatureGroup, LogAnalysisRecord, TestFileInfo, TestRunStatus } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
 import { routeRunToRepository } from "../../lib/cloudRunner";
+import {
+  TabToolbar,
+  TabContent,
+  EmptyState,
+  LoadingState,
+  DemoBanner,
+  ErrorBanner,
+  SecondaryButton,
+  FormInput,
+} from "../../components/ui/layout";
 
 type HistoryView = "tests" | "logs";
 
@@ -33,6 +43,32 @@ function formatAbsoluteDate(iso: string): string {
   });
 }
 
+const EXECUTION_STATUS_STYLES: Record<TestRunStatus, string> = {
+  PASSED: "bg-green-500/10 text-green-400 border-green-500/20",
+  FAILED: "bg-red-500/10 text-red-400 border-red-500/20",
+  RUNNING: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20 animate-pulse",
+};
+
+function ExecutionStatusBadge({ status }: { status?: TestRunStatus | null }) {
+  if (!status) {
+    return (
+      <span className="rounded-full px-2 py-0.5 text-xs font-medium border bg-slate-500/10 text-slate-400 border-slate-500/20">
+        NO RUNS
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={clsx(
+        "rounded-full px-2 py-0.5 text-xs font-medium border uppercase",
+        EXECUTION_STATUS_STYLES[status]
+      )}
+    >
+      {status}
+    </span>
+  );
+}
 
 // ─── Code view modal ──────────────────────────────────────────────────────────
 
@@ -87,9 +123,9 @@ function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false
   const { meta, tests } = group;
 
   return (
-    <div className="rounded-xl border border-surface-600 overflow-hidden transition-all">
+    <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50 transition-all">
       {/* Card header */}
-      <div className="flex items-start gap-4 p-5 bg-surface-800">
+      <div className="flex items-start gap-4 p-5 bg-surface-800/40">
         {/* Type icon */}
         <div className={clsx(
           "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
@@ -120,6 +156,7 @@ function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false
             )}>
               {meta.inputType === "swagger" ? "API Tests" : "UI Tests"}
             </span>
+            <ExecutionStatusBadge status={meta.latestRunStatus} />
           </div>
 
           {meta.description && (
@@ -172,7 +209,13 @@ function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false
       {expanded && (
         <div className="border-t border-surface-600 bg-surface-900/60 p-4 space-y-2 animate-fade-in">
           {tests.length === 0 ? (
-            <p className="text-xs text-slate-600 text-center py-4">No test files found</p>
+            <EmptyState
+              icon={FileCode2}
+              accent="slate"
+              title="No test files"
+              description="This feature has no saved test files yet."
+              compact
+            />
           ) : (
             tests.map((file) => (
               <div
@@ -231,8 +274,8 @@ function LogAnalysisCard({
   const severityClass = SEVERITY_COLORS[analysis.severity.toLowerCase()] ?? SEVERITY_COLORS.unknown;
 
   return (
-    <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800">
-      <div className="flex items-start gap-4 p-5">
+    <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50">
+      <div className="flex items-start gap-4 p-5 bg-surface-800/40">
         <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-violet-500/20 border border-violet-500/30">
           <BrainCircuit className="w-5 h-5 text-violet-400" />
         </div>
@@ -332,7 +375,11 @@ export default function HistoryTab() {
       refreshLogs();
     };
     window.addEventListener("qa-genius:repository-changed", onChanged);
-    return () => window.removeEventListener("qa-genius:repository-changed", onChanged);
+    window.addEventListener("qa-genius:test-runs-changed", onChanged);
+    return () => {
+      window.removeEventListener("qa-genius:repository-changed", onChanged);
+      window.removeEventListener("qa-genius:test-runs-changed", onChanged);
+    };
   }, [refresh, refreshLogs]);
 
   const showMockData = !isLoading && !error && realFeatures.length === 0;
@@ -365,14 +412,14 @@ export default function HistoryTab() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-      <div className="flex-shrink-0 flex items-center gap-4 px-6 py-3 border-b border-surface-600 bg-surface-800/30">
+      <TabToolbar>
         <div className="flex items-center gap-1 bg-surface-900/80 rounded-lg p-1 border border-surface-600">
           <button
             type="button"
             onClick={() => setView("tests")}
             className={clsx(
               "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              view === "tests" ? "bg-surface-700 text-white" : "text-slate-400 hover:text-slate-200"
+              view === "tests" ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
             )}
           >
             Test History
@@ -382,7 +429,7 @@ export default function HistoryTab() {
             onClick={() => setView("logs")}
             className={clsx(
               "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              view === "logs" ? "bg-surface-700 text-white" : "text-slate-400 hover:text-slate-200"
+              view === "logs" ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
             )}
           >
             Log Analyses
@@ -402,48 +449,44 @@ export default function HistoryTab() {
 
         <div className="flex-1 max-w-64 relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-          <input
+          <FormInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={view === "tests" ? "Search features…" : "Search log analyses…"}
-            className="w-full bg-surface-700 border border-surface-600 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            className="pl-8 py-1.5 text-xs"
           />
         </div>
 
-        <button
-          onClick={handleRefresh}
-          disabled={activeLoading}
-          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-surface-700 hover:bg-surface-600 rounded-lg transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} /> Refresh
-        </button>
-      </div>
+        <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="ml-auto">
+          <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} />
+          Refresh
+        </SecondaryButton>
+      </TabToolbar>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {activeLoading && (
-          <div className="flex items-center justify-center py-16 text-slate-500">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…
-          </div>
-        )}
+      <TabContent className="space-y-4">
+        {activeLoading && <LoadingState message="Loading history…" />}
 
-        {!activeLoading && activeError && (
-          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-5 py-4">{activeError}</div>
-        )}
+        {!activeLoading && activeError && <ErrorBanner>{activeError}</ErrorBanner>}
 
         {view === "tests" && !activeLoading && (
           <>
             {showMockData && (
-              <div className="flex items-center gap-2 bg-amber-500/8 border border-amber-500/20 rounded-xl px-4 py-3 text-sm text-amber-400">
-                <FlaskConical className="w-4 h-4 flex-shrink-0" aria-hidden />
+              <DemoBanner>
+                <FlaskConical className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
                 <span>
-                  <strong>Demo Mode</strong> — these are sample features to showcase the UI.
+                  <strong>Demo Mode</strong> — sample features to showcase the UI.
                   Generate your first real test in the <strong>Test Generator</strong> tab to replace them.
                 </span>
-              </div>
+              </DemoBanner>
             )}
 
             {!activeLoading && filtered.length === 0 && features.length > 0 && (
-              <p className="text-center text-slate-500 text-sm py-8">No features match &ldquo;{search}&rdquo;</p>
+              <EmptyState
+                icon={Search}
+                accent="slate"
+                title="No matches found"
+                description={`Nothing matches "${search}". Try a different search term.`}
+              />
             )}
 
             {filtered.map((group) => (
@@ -466,11 +509,13 @@ export default function HistoryTab() {
         {view === "logs" && !activeLoading && (
           <>
             {filteredLogs.length === 0 && !logsError && (
-              <div className="text-center py-16 text-slate-500">
-                <BrainCircuit className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">No log analyses saved yet.</p>
-                <p className="text-xs mt-1">Run an analysis in the <strong>Log Analyzer</strong> tab — it will appear here automatically.</p>
-              </div>
+              <EmptyState
+                icon={BrainCircuit}
+                accent="violet"
+                title="No log analyses saved yet"
+                description="Run an analysis in the Log Analyzer tab — results are saved here automatically for future reference."
+                hint="Supports Playwright, Coralogix, Node.js, Jest, and Docker logs."
+              />
             )}
 
             {filteredLogs.map((analysis) => (
@@ -482,7 +527,7 @@ export default function HistoryTab() {
             ))}
           </>
         )}
-      </div>
+      </TabContent>
 
       {codeViewFile && (
         <CodeModal

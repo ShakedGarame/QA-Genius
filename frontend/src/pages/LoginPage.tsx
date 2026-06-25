@@ -162,7 +162,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         <p className="text-xs text-slate-600 text-center mt-6">
           Built by{" "}
           <a
-            href="https://github.com/shakedgarame"
+            href="https://github.com/ShakedGarame/QA-Genius"
             target="_blank"
             rel="noopener noreferrer"
             className="text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"

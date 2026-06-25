@@ -126,6 +126,39 @@ export async function getOrCreateGuestUser(): Promise<DbUser> {
   }
 }
 
+/**
+ * Ensure the session user exists in Supabase before any FK-backed write.
+ * Fixes stale "local-dev-guest" sessions created while the DB was offline.
+ */
+export async function resolveDbUser(sessionUser: DbUser): Promise<DbUser> {
+  const existing = await findUserById(sessionUser.id);
+  if (existing) return existing;
+
+  if (sessionUser.github_id === "mock_user_123" || sessionUser.id === buildLocalDevGuest().id) {
+    return getOrCreateGuestUser();
+  }
+
+  if (sessionUser.github_id) {
+    return upsertGithubUser({
+      githubId: sessionUser.github_id,
+      email: sessionUser.email,
+      name: sessionUser.name,
+      avatarUrl: sessionUser.avatar_url,
+    });
+  }
+
+  if (sessionUser.google_id) {
+    return upsertGoogleUser({
+      googleId: sessionUser.google_id,
+      email: sessionUser.email,
+      name: sessionUser.name,
+      avatarUrl: sessionUser.avatar_url,
+    });
+  }
+
+  return getOrCreateGuestUser();
+}
+
 export async function upsertGithubUser(profile: {
   githubId: string;
   email: string | null;
@@ -292,11 +325,15 @@ export async function saveGeneratedTest(
 }
 
 export async function listFeatureGroups(userId: string): Promise<FeatureGroup[]> {
-  const features = await prisma.feature.findMany({
-    where: { userId },
-    include: { tests: { orderBy: { fileName: "asc" } } },
-    orderBy: { updatedAt: "desc" },
-  });
+  const [features, latestBySlug, latestByName] = await Promise.all([
+    prisma.feature.findMany({
+      where: { userId },
+      include: { tests: { orderBy: { fileName: "asc" } } },
+      orderBy: { updatedAt: "desc" },
+    }),
+    getLatestRunStatusBySlug(userId),
+    getLatestRunStatusByFeatureName(userId),
+  ]);
 
   return features.map((feature) => ({
     meta: {
@@ -307,6 +344,10 @@ export async function listFeatureGroups(userId: string): Promise<FeatureGroup[]>
       updatedAt: feature.updatedAt.toISOString(),
       description: feature.description ?? undefined,
       prdText: feature.prdText ?? undefined,
+      latestRunStatus:
+        latestBySlug.get(feature.slug) ??
+        latestByName.get(feature.featureName) ??
+        null,
     },
     tests: feature.tests.map((test) =>
       buildTestFileInfo(
@@ -315,6 +356,39 @@ export async function listFeatureGroups(userId: string): Promise<FeatureGroup[]>
       )
     ),
   }));
+}
+
+/** Most recent execution status per feature slug (from relative_path prefix). */
+async function getLatestRunStatusBySlug(userId: string): Promise<Map<string, TestRunStatus>> {
+  const runs = await prisma.testRun.findMany({
+    where: { userId, relativePath: { not: null } },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, relativePath: true },
+  });
+
+  const map = new Map<string, TestRunStatus>();
+  for (const run of runs) {
+    const slug = run.relativePath?.split("/")[0];
+    if (!slug || map.has(slug)) continue;
+    map.set(slug, run.status as TestRunStatus);
+  }
+  return map;
+}
+
+/** Fallback match by display feature name when relative_path is missing. */
+async function getLatestRunStatusByFeatureName(userId: string): Promise<Map<string, TestRunStatus>> {
+  const runs = await prisma.testRun.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, featureName: true },
+  });
+
+  const map = new Map<string, TestRunStatus>();
+  for (const run of runs) {
+    if (!run.featureName || map.has(run.featureName)) continue;
+    map.set(run.featureName, run.status as TestRunStatus);
+  }
+  return map;
 }
 
 export async function getGeneratedTestCode(
@@ -567,12 +641,21 @@ export async function updateTestRun(
   const existing = await prisma.testRun.findFirst({ where: { id, userId } });
   if (!existing) return null;
 
+  const isTerminal =
+    data.status != null && data.status !== "RUNNING" && existing.status === "RUNNING";
+  const resolvedDuration =
+    data.durationMs != null && data.durationMs > 0
+      ? data.durationMs
+      : isTerminal
+        ? Math.max(0, Date.now() - existing.createdAt.getTime())
+        : data.durationMs;
+
   try {
     const row = await prisma.testRun.update({
       where: { id },
       data: {
         status: data.status,
-        durationMs: data.durationMs,
+        durationMs: resolvedDuration,
         gitHubRunId:
           data.gitHubRunId !== undefined
             ? normalizeGitHubRunId(data.gitHubRunId)
@@ -601,26 +684,96 @@ export async function listTestRuns(userId: string, limit = 50): Promise<DbTestRu
   return rows.map(mapTestRun);
 }
 
+/** Mark long-abandoned RUNNING rows as FAILED so metrics stay accurate. */
+const STALE_RUNNING_MS = 2 * 60 * 60 * 1000;
+/** Runs newer than this are considered actively in progress. */
+const ACTIVE_RUNNING_MS = 30 * 60 * 1000;
+
+export async function reconcileStaleRunningRuns(userId: string): Promise<number> {
+  const cutoff = new Date(Date.now() - STALE_RUNNING_MS);
+  const stale = await prisma.testRun.findMany({
+    where: {
+      userId,
+      status: "RUNNING",
+      createdAt: { lt: cutoff },
+    },
+    select: { id: true, createdAt: true },
+  });
+
+  const now = Date.now();
+  await Promise.all(
+    stale.map((run) =>
+      prisma.testRun.update({
+        where: { id: run.id },
+        data: {
+          status: "FAILED",
+          durationMs: Math.max(0, now - run.createdAt.getTime()),
+        },
+      })
+    )
+  );
+
+  if (stale.length > 0) {
+    console.info(
+      `[dashboard] reconciled ${stale.length} stale RUNNING test run(s) for user ${userId}`
+    );
+  }
+  return stale.length;
+}
+
 export async function getTestRunDashboardStats(userId: string): Promise<{
   totalRuns: number;
-  passRatePercent: number;
-  averageDurationMs: number;
+  completedRuns: number;
+  runningRuns: number;
+  passedRuns: number;
+  failedRuns: number;
+  passRatePercent: number | null;
+  averageDurationMs: number | null;
   recentRuns: DbTestRun[];
 }> {
-  const recentRuns = await listTestRuns(userId, 30);
-  const completed = recentRuns.filter((r) => r.status !== "RUNNING");
-  const passed = completed.filter((r) => r.status === "PASSED");
-  const passRatePercent =
-    completed.length > 0 ? Math.round((passed.length / completed.length) * 100) : 0;
-  const averageDurationMs =
-    completed.length > 0
-      ? Math.round(completed.reduce((sum, r) => sum + r.duration_ms, 0) / completed.length)
-      : 0;
+  await reconcileStaleRunningRuns(userId);
 
-  const totalRuns = await prisma.testRun.count({ where: { userId } });
+  const activeRunningCutoff = new Date(Date.now() - ACTIVE_RUNNING_MS);
+
+  // ── Aggregate metrics across ALL completed runs in the DB ─────────────────
+  // Using Prisma's aggregate so we never load every row into memory.
+  const [totalRuns, completedCount, runningCount, failedCount, passedCount, durationAgg] =
+    await Promise.all([
+      prisma.testRun.count({ where: { userId } }),
+      prisma.testRun.count({ where: { userId, status: { not: "RUNNING" } } }),
+      prisma.testRun.count({
+        where: {
+          userId,
+          status: "RUNNING",
+          createdAt: { gte: activeRunningCutoff },
+        },
+      }),
+      prisma.testRun.count({ where: { userId, status: "FAILED" } }),
+      prisma.testRun.count({ where: { userId, status: "PASSED" } }),
+      // Average only over completed runs that actually recorded a duration (> 0)
+      prisma.testRun.aggregate({
+        where: { userId, status: { not: "RUNNING" }, durationMs: { gt: 0 } },
+        _avg: { durationMs: true },
+      }),
+    ]);
+
+  const passRatePercent =
+    completedCount > 0 ? Math.round((passedCount / completedCount) * 100) : null;
+
+  const averageDurationMs =
+    durationAgg._avg.durationMs != null
+      ? Math.round(durationAgg._avg.durationMs)
+      : null;
+
+  // Recent 30 rows for the table display only (not used for metric maths)
+  const recentRuns = await listTestRuns(userId, 30);
 
   return {
     totalRuns,
+    completedRuns: completedCount,
+    runningRuns: runningCount,
+    passedRuns: passedCount,
+    failedRuns: failedCount,
     passRatePercent,
     averageDurationMs,
     recentRuns,

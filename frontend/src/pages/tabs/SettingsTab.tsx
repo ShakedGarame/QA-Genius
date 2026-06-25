@@ -20,6 +20,7 @@ import {
   syncGitHubTokenToStorage,
   isRealGitHubToken,
 } from "../../lib/githubToken";
+import { TabContent, LoadingState } from "../../components/ui/layout";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,8 +126,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-2xl overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-surface-600">
+    <div className="bg-surface-800/50 border border-surface-600 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-surface-600 bg-surface-800/40">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-surface-700 flex items-center justify-center">
             <Icon className="w-4 h-4 text-slate-300" aria-hidden />
@@ -281,18 +282,15 @@ export default function SettingsTab() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center flex-1 p-8">
-        <div className="flex flex-col items-center gap-3">
-          <RefreshCw className="w-6 h-6 text-slate-500 animate-spin" />
-          <p className="text-sm text-slate-500">Loading settings…</p>
-        </div>
+      <div className="flex flex-1 min-h-0">
+        <LoadingState message="Loading settings…" />
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-6 py-6 space-y-6">
+    <TabContent>
+      <div className="max-w-2xl mx-auto space-y-6">
 
         {/* Error */}
         {error && (
@@ -526,6 +524,6 @@ export default function SettingsTab() {
           </button>
         </div>
       </div>
-    </div>
+    </TabContent>
   );
 }

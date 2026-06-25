@@ -9,10 +9,12 @@ import {
   Wrench,
   Info,
   Network,
+  Maximize2,
 } from "lucide-react";
 import clsx from "clsx";
 import { FailureAnalysis, McpLog, McpStep } from "../../types";
 import McpConfigModal, { McpSettingsButton } from "./McpConfigModal";
+import FullscreenModal, { CopyButton } from "../ui/FullscreenModal";
 
 interface Props {
   errorDetails: string;
@@ -55,6 +57,10 @@ export default function FailureAnalyzer({
 }: Props) {
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [logModalOpen, setLogModalOpen] = useState(false);
+
+  const logText = errorDetails || failureLog;
+  const logPreview = logText.slice(0, 1200);
 
   const handlePrimaryAction = () => {
     if (hasCoralogix) {
@@ -67,6 +73,7 @@ export default function FailureAnalyzer({
   return (
     <>
       <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 overflow-hidden animate-slide-up">
+        {/* ── Header row ── */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-red-500/20 gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
@@ -97,12 +104,27 @@ export default function FailureAnalyzer({
           </div>
         </div>
 
+        {/* ── Error log preview ── */}
         <div className="px-5 py-3 bg-surface-900/50">
+          {/* Toolbar: Copy + Expand */}
+          <div className="flex items-center justify-end gap-1 mb-2">
+            <CopyButton text={logText} />
+            <button
+              type="button"
+              onClick={() => setLogModalOpen(true)}
+              title="Expand to full screen"
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>Expand</span>
+            </button>
+          </div>
           <pre className="text-xs text-red-300 font-mono whitespace-pre-wrap line-clamp-6 max-h-40 overflow-y-auto">
-            {errorDetails || failureLog.slice(0, 1200)}
+            {logPreview}
           </pre>
         </div>
 
+        {/* ── MCP step timeline ── */}
         {mcpSteps.length > 0 && (
           <div className="px-5 py-4 border-t border-surface-600 space-y-2">
             <div className="flex items-center gap-2 mb-3">
@@ -127,6 +149,7 @@ export default function FailureAnalyzer({
           </div>
         )}
 
+        {/* ── AI analysis sections ── */}
         {analysis && (
           <div className="border-t border-surface-600 p-5 space-y-5 animate-fade-in">
             <div className="rounded-lg bg-surface-800 border border-surface-600 p-4">
@@ -211,6 +234,21 @@ export default function FailureAnalyzer({
           </div>
         )}
       </div>
+
+      {/* ── Fullscreen log modal ── */}
+      <FullscreenModal
+        open={logModalOpen}
+        onClose={() => setLogModalOpen(false)}
+        title={
+          <span className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+            <span className="text-red-300">Test Failed — Full Log</span>
+          </span>
+        }
+        copyText={logText}
+      >
+        <pre className="text-red-300 whitespace-pre-wrap">{logText}</pre>
+      </FullscreenModal>
 
       <McpConfigModal
         open={mcpModalOpen}

@@ -97,6 +97,7 @@ export interface FeatureMeta {
   updatedAt: string;
   description?: string;
   prdText?: string;         // truncated snippet for display
+  latestRunStatus?: "RUNNING" | "PASSED" | "FAILED" | null;
 }
 
 export interface TestFileInfo {

@@ -14,6 +14,15 @@ import clsx from "clsx";
 import { RawLogAnalysisResponse } from "../../types";
 import { buildOpenAIKeyHeaders } from "../../lib/apiKeys";
 import { readPendingAnalyzerPayload } from "../../lib/cloudRunner";
+import {
+  SidebarPanel,
+  PanelHeader,
+  PanelBody,
+  EmptyState,
+  SectionLabel,
+  FormTextarea,
+  ErrorBanner,
+} from "../../components/ui/layout";
 
 const LOG_SOURCES = [
   { value: "playwright", label: "Playwright Test Failure", icon: "🎭", placeholder: `Error: Timed out 5000ms waiting for expect(locator).toBeVisible()
@@ -172,20 +181,18 @@ export default function LogAnalyzerTab() {
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Left: Input panel ── */}
-      <div className="w-[480px] flex-shrink-0 border-r border-surface-600 flex flex-col">
-        <div className="px-5 py-4 border-b border-surface-600">
-          <h2 className="text-sm font-semibold text-slate-200 mb-0.5">Instant Log Analyzer</h2>
+      <SidebarPanel width="w-[480px]">
+        <PanelHeader className="flex-col items-start gap-1 !py-4">
+          <h2 className="text-sm font-semibold text-slate-200">Instant Log Analyzer</h2>
           <p className="text-xs text-slate-500">
             Paste any logs or errors — AI will explain the root cause in plain language
           </p>
-        </div>
+        </PanelHeader>
 
-        <div className="flex-1 flex flex-col gap-4 p-5 overflow-auto">
+        <PanelBody className="flex flex-col gap-4 p-5">
           {/* Source dropdown */}
           <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
-              Log Source
-            </label>
+            <SectionLabel>Log Source</SectionLabel>
             <div className="relative">
               <select
                 value={source}
@@ -194,7 +201,7 @@ export default function LogAnalyzerTab() {
                   setRawLogs("");
                   setResult(null);
                 }}
-                className="w-full appearance-none bg-surface-700 border border-surface-500 text-slate-200 text-sm rounded-lg px-4 py-2.5 pr-8 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 cursor-pointer"
+                className="w-full appearance-none bg-surface-900 border border-surface-600 text-slate-200 text-sm rounded-lg px-4 py-2.5 pr-8 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 cursor-pointer"
               >
                 {LOG_SOURCES.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -208,14 +215,12 @@ export default function LogAnalyzerTab() {
 
           {/* Log text area */}
           <div className="flex-1 flex flex-col">
-            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
-              Raw Logs / Error Output
-            </label>
-            <textarea
+            <SectionLabel>Raw Logs / Error Output</SectionLabel>
+            <FormTextarea
               value={rawLogs}
               onChange={(e) => setRawLogs(e.target.value)}
               placeholder={activeSource.placeholder}
-              className="flex-1 min-h-[240px] w-full bg-surface-800 border border-surface-600 rounded-lg px-4 py-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 resize-none font-mono leading-5"
+              className="flex-1 min-h-[240px]"
             />
             <p className="text-[10px] text-slate-600 mt-1 text-right">
               {rawLogs.length.toLocaleString()} characters
@@ -246,42 +251,29 @@ export default function LogAnalyzerTab() {
             )}
           </div>
 
-          {error && (
-            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2.5">
-              {error}
-            </div>
-          )}
-        </div>
-      </div>
+          {error && <ErrorBanner>{error}</ErrorBanner>}
+        </PanelBody>
+      </SidebarPanel>
 
       {/* ── Right: Analysis result ── */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-auto bg-surface-900/50">
+      <div className="qa-main-pane overflow-auto">
         {!result && !isAnalyzing && (
-          <div className="flex flex-col items-center justify-center h-full text-center text-slate-600 space-y-3 p-8">
-            <div className="w-16 h-16 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-              <BrainCircuit className="w-7 h-7 text-violet-500/40" />
-            </div>
-            <div>
-              <p className="text-slate-500 font-medium">No analysis yet</p>
-              <p className="text-sm mt-1">Paste your logs and click "Analyze Logs"</p>
-            </div>
-            <div className="mt-4 text-xs text-slate-700 space-y-1">
-              <p>Supports: Playwright · Coralogix · Node.js · Jest · Docker</p>
-              <p>Powered by: OpenAI GPT-4o (or smart mock fallback)</p>
-            </div>
-          </div>
+          <EmptyState
+            icon={BrainCircuit}
+            accent="violet"
+            title="No analysis yet"
+            description='Paste your logs on the left and click "Analyze Logs" to get a plain-language root cause breakdown.'
+            hint="Supports: Playwright · Coralogix · Node.js · Jest · Docker"
+          />
         )}
 
         {isAnalyzing && (
-          <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
-            <div className="w-14 h-14 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-              <Zap className="w-6 h-6 text-violet-400 animate-pulse" />
-            </div>
-            <div>
-              <p className="text-slate-200 font-medium">Analyzing logs…</p>
-              <p className="text-sm text-slate-400 mt-1">{statusMessage || "Sending to AI engine"}</p>
-            </div>
-          </div>
+          <EmptyState
+            icon={Zap}
+            accent="violet"
+            title="Analyzing logs…"
+            description={statusMessage || "Sending to AI engine"}
+          />
         )}
 
         {result && !isAnalyzing && (
@@ -318,7 +310,7 @@ export default function LogAnalyzerTab() {
             </div>
 
             {/* Root cause */}
-            <div className="rounded-xl bg-surface-800 border border-surface-600 p-4">
+            <div className="rounded-xl bg-surface-800/50 border border-surface-600 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <ShieldAlert className="w-4 h-4 text-orange-400" />
                 <p className="text-xs font-bold text-orange-300 uppercase tracking-wider">Root Cause</p>
@@ -327,7 +319,7 @@ export default function LogAnalyzerTab() {
             </div>
 
             {/* Explanation */}
-            <div className="rounded-xl bg-surface-800 border border-surface-600 p-4">
+            <div className="rounded-xl bg-surface-800/50 border border-surface-600 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <Info className="w-4 h-4 text-sky-400" />
                 <p className="text-xs font-bold text-sky-300 uppercase tracking-wider">Technical Explanation</p>

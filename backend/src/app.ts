@@ -25,6 +25,7 @@ import logAnalysesRouter from "./routes/logAnalyses.js";
 import testRunsRouter from "./routes/testRuns.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
+import { ensureDbUser } from "./middleware/ensureDbUser.js";
 import { autoLocalGuest } from "./middleware/autoLocalGuest.js";
 
 const app = express();
@@ -123,13 +124,13 @@ app.get("/health", (_req, res) => {
 });
 
 // ─── Protected API routes ─────────────────────────────────────────────────────
-app.use("/api", requireAuth, uploadRouter);
-app.use("/api", requireAuth, generateRouter);
-app.use("/api", requireAuth, runRouter);
-app.use("/api", requireAuth, analyzeRouter);
-app.use("/api", requireAuth, testsRouter);
-app.use("/api", requireAuth, logAnalysesRouter);
-app.use("/api", requireAuth, testRunsRouter);
+app.use("/api", requireAuth, ensureDbUser, uploadRouter);
+app.use("/api", requireAuth, ensureDbUser, generateRouter);
+app.use("/api", requireAuth, ensureDbUser, runRouter);
+app.use("/api", requireAuth, ensureDbUser, analyzeRouter);
+app.use("/api", requireAuth, ensureDbUser, testsRouter);
+app.use("/api", requireAuth, ensureDbUser, logAnalysesRouter);
+app.use("/api", requireAuth, ensureDbUser, testRunsRouter);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {

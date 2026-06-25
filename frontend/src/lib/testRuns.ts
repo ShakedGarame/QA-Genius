@@ -6,8 +6,12 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   if (!res.ok) throw new Error(json.error ?? "Failed to load dashboard stats");
   return {
     totalRuns: Number(json.totalRuns ?? 0),
-    passRatePercent: Number(json.passRatePercent ?? 0),
-    averageDurationMs: Number(json.averageDurationMs ?? 0),
+    completedRuns: Number(json.completedRuns ?? 0),
+    runningRuns: Number(json.runningRuns ?? 0),
+    passedRuns: Number(json.passedRuns ?? 0),
+    failedRuns: Number(json.failedRuns ?? 0),
+    passRatePercent: json.passRatePercent != null ? Number(json.passRatePercent) : null,
+    averageDurationMs: json.averageDurationMs != null ? Number(json.averageDurationMs) : null,
     recentRuns: (json.recentRuns ?? []) as TestRunRecord[],
   };
 }
@@ -16,7 +20,7 @@ export async function finishTestRun(
   testRunId: string,
   data: {
     status: TestRunStatus;
-    durationMs: number;
+    durationMs?: number;
     gitHubRunId?: number;
     htmlUrl?: string;
     runner?: string;
@@ -40,4 +44,9 @@ export function mapResultStatus(status: string): TestRunStatus {
   if (status === "passed") return "PASSED";
   if (status === "running") return "RUNNING";
   return "FAILED";
+}
+
+/** Mark a stuck or user-cancelled run as failed in Supabase. */
+export async function cancelTestRun(testRunId: string): Promise<void> {
+  await finishTestRun(testRunId, { status: "FAILED" });
 }

@@ -273,6 +273,7 @@ export const MOCK_FEATURES: FeatureGroup[] = [
       createdAt: daysAgo(4),
       updatedAt: daysAgo(2),
       description: "Login flow · Password reset · Session management · OAuth",
+      latestRunStatus: "PASSED",
     },
     tests: [
       {
@@ -295,6 +296,7 @@ export const MOCK_FEATURES: FeatureGroup[] = [
       createdAt: daysAgo(7),
       updatedAt: daysAgo(5),
       description: "Stripe checkout · Card validation · 3DS · Decline handling",
+      latestRunStatus: "FAILED",
     },
     tests: [
       {
@@ -317,6 +319,7 @@ export const MOCK_FEATURES: FeatureGroup[] = [
       createdAt: daysAgo(10),
       updatedAt: daysAgo(9),
       description: "GET /users · POST /users · PATCH /users/:id — OpenAPI 3.0 spec",
+      latestRunStatus: "RUNNING",
     },
     tests: [
       {

@@ -1,7 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { RunTestResult, FailureAnalysis, McpStep } from "../types";
 import { buildOpenAIKeyHeaders } from "../lib/apiKeys";
 import { executeTestRun } from "../lib/cloudRunner";
+
+export type RunTestInput =
+  | string
+  | { code: string; relativePath?: string };
 
 export function useTestRunner() {
   const [isRunning, setIsRunning] = useState(false);
@@ -14,7 +18,25 @@ export function useTestRunner() {
   const [mcpSteps, setMcpSteps] = useState<McpStep[]>([]);
   const [analysis, setAnalysis] = useState<FailureAnalysis | null>(null);
 
-  const runTest = useCallback(async (code: string) => {
+  const abortRef = useRef<AbortController | null>(null);
+
+  const stopTest = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const runTest = useCallback(async (input: RunTestInput) => {
+    const body =
+      typeof input === "string"
+        ? { code: input }
+        : {
+            code: input.code,
+            ...(input.relativePath ? { relativePath: input.relativePath } : {}),
+          };
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setIsRunning(true);
     setOutput("");
     setProgress(0);
@@ -23,18 +45,45 @@ export function useTestRunner() {
     setMcpSteps([]);
 
     try {
-      await executeTestRun({ code }, {
-        onStatus: (msg, pct) => {
-          setStatusMessage(msg);
-          setProgress(pct);
+      const runResult = await executeTestRun(
+        body,
+        {
+          onStatus: (msg, pct) => {
+            setStatusMessage(msg);
+            setProgress(pct);
+          },
+          onOutputAppend: (chunk) => setOutput((prev) => prev + chunk),
+          onOutputReplace: (text) => setOutput(text),
+          onResult: (next) => setResult(next),
         },
-        onOutputAppend: (chunk) => setOutput((prev) => prev + chunk),
-        onOutputReplace: (text) => setOutput(text),
-        onResult: (runResult) => setResult(runResult),
-      });
+        { signal: controller.signal }
+      );
+
+      if (controller.signal.aborted) {
+        setOutput((prev) =>
+          prev.includes("stopped by user") ? prev : `${prev}\n\n⏹ Run stopped by user.\n`
+        );
+        setResult((prev) =>
+          prev ?? {
+            testId: "cancelled",
+            status: "failed",
+            output: "Run stopped by user.",
+            duration: 0,
+          }
+        );
+      } else if (runResult) {
+        setResult(runResult);
+      }
     } catch (e) {
-      setOutput(`Error: ${e instanceof Error ? e.message : "Unknown error"}`);
+      if (controller.signal.aborted) {
+        setOutput((prev) => `${prev}\n\n⏹ Run stopped by user.\n`);
+      } else {
+        setOutput(`Error: ${e instanceof Error ? e.message : "Unknown error"}`);
+      }
     } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       setIsRunning(false);
       setStatusMessage("");
     }
@@ -101,6 +150,7 @@ export function useTestRunner() {
     statusMessage,
     result,
     runTest,
+    stopTest,
     isAnalyzing,
     mcpSteps,
     analysis,

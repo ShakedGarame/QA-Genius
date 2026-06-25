@@ -1,17 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   RefreshCw, Play, Trash2, FileCode2, Loader2,
-  CheckCircle2, XCircle, Clock, Terminal, Globe, FileText, FlaskConical,
-  ChevronDown, ChevronRight,
+  Globe, FileText, FlaskConical,
+  ChevronDown, ChevronRight, ExternalLink,
 } from "lucide-react";
 import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
-import { useAuth } from "../../hooks/useAuth";
-import { FeatureGroup, RunTestResult, TestFileInfo } from "../../types";
+import { FeatureGroup, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
-import { executeTestRun, requireGitHubTokenForCloudRun, shouldUseGitHubCloudRunner, routeFailureLogsToAnalyzer, getActionableFailureLogs } from "../../lib/cloudRunner";
-import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
-import ArtifactsGallery from "../../components/qa-genius/ArtifactsGallery";
+import { routeRunToGenerator } from "../../lib/cloudRunner";
+import {
+  SidebarPanel,
+  PanelHeader,
+  PanelBody,
+  EmptyState,
+  LoadingState,
+  DemoBanner,
+  ErrorBanner,
+  SecondaryButton,
+} from "../../components/ui/layout";
 
 function formatBytes(b: number) {
   return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
@@ -20,47 +27,15 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleString();
 }
 
-async function simulateMockRun(
-  file: TestFileInfo,
-  onStatus: (msg: string, progress: number) => void,
-  onOutput: (chunk: string) => void
-): Promise<RunTestResult> {
-  const steps: { delay: number; text: string; progress: number }[] = [
-    { delay: 400, text: "☁️  Demo mode — simulated Playwright run\n", progress: 10 },
-    { delay: 500, text: `⚡ npx playwright test ${file.fileName} --reporter=list\n`, progress: 25 },
-    { delay: 600, text: "\nRunning 2 tests using 1 worker\n\n", progress: 40 },
-    { delay: 700, text: "  ✓  TC-001: renders without errors (1.2s)\n", progress: 65 },
-    { delay: 800, text: "  ✓  TC-002: meets acceptance criteria (0.9s)\n\n", progress: 85 },
-    { delay: 400, text: "  2 passed (2.5s)\n", progress: 100 },
-  ];
-
-  let output = "";
-  for (const step of steps) {
-    onStatus(`Running ${file.fileName}…`, step.progress);
-    await new Promise((r) => setTimeout(r, step.delay));
-    output += step.text;
-    onOutput(step.text);
-  }
-
-  return {
-    testId: `mock-${file.relativePath}`,
-    status: "passed",
-    output,
-    duration: 2500,
-  };
-}
-
 interface FileRowProps {
   file: TestFileInfo;
   isSelected: boolean;
-  isRunning: boolean;
-  result: RunTestResult | null;
   onSelect: (file: TestFileInfo) => void;
   onDelete: (file: TestFileInfo) => void;
   isMock?: boolean;
 }
 
-function FileRow({ file, isSelected, isRunning, result, onSelect, onDelete, isMock = false }: FileRowProps) {
+function FileRow({ file, isSelected, onSelect, onDelete, isMock = false }: FileRowProps) {
   return (
     <div
       role="button"
@@ -69,42 +44,18 @@ function FileRow({ file, isSelected, isRunning, result, onSelect, onDelete, isMo
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(file); } }}
       className={clsx(
         "flex items-center gap-3 px-3 py-2 rounded-lg border transition-all cursor-pointer",
-        isSelected ? "border-sky-500/50 bg-sky-500/10 ring-1 ring-sky-500/30"
-        : isRunning ? "border-sky-500/30 bg-sky-500/5"
-        : result?.status === "passed" ? "border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/30"
-        : result?.status === "failed" ? "border-red-500/20 bg-red-500/5 hover:border-red-500/30"
-        : "border-surface-600 bg-surface-800/50 hover:border-surface-500"
+        isSelected
+          ? "border-sky-500/50 bg-sky-500/10 ring-1 ring-sky-500/30"
+          : "border-surface-600 bg-surface-800/50 hover:border-surface-500"
       )}
     >
-      <div className="flex-shrink-0">
-        {isRunning ? <Loader2 className="w-4 h-4 text-sky-400 animate-spin" />
-        : result?.status === "passed" ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-        : result?.status === "failed" ? <XCircle className="w-4 h-4 text-red-400" />
-        : <FileCode2 className="w-4 h-4 text-slate-500" />}
-      </div>
-
+      <FileCode2 className="w-4 h-4 text-slate-500 flex-shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-mono text-slate-200 truncate">{file.fileName}</span>
-          {result && (
-            <span className={clsx(
-              "text-[9px] font-bold px-1 rounded uppercase flex-shrink-0",
-              result.status === "passed" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
-            )}>
-              {result.status}
-            </span>
-          )}
-          {result?.duration && (
-            <span className="text-[9px] text-slate-600 flex items-center gap-0.5 flex-shrink-0">
-              <Clock className="w-2 h-2" />{(result.duration / 1000).toFixed(1)}s
-            </span>
-          )}
-        </div>
+        <span className="text-xs font-mono text-slate-200 truncate block">{file.fileName}</span>
         <p className="text-[10px] text-slate-600 truncate font-mono mt-0.5">
           {formatBytes(file.sizeBytes)} · {formatDate(file.modifiedAt)}
         </p>
       </div>
-
       {!isMock && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(file); }}
@@ -121,8 +72,6 @@ function FileRow({ file, isSelected, isRunning, result, onSelect, onDelete, isMo
 interface FeatureCardProps {
   group: FeatureGroup;
   selectedPath: string | null;
-  fileResults: Record<string, RunTestResult>;
-  runningPath: string | null;
   onSelect: (file: TestFileInfo) => void;
   onDelete: (file: TestFileInfo) => void;
   onDeleteFeature: (slug: string) => void;
@@ -130,62 +79,39 @@ interface FeatureCardProps {
 }
 
 function FeatureCard({
-  group, selectedPath, fileResults, runningPath, onSelect, onDelete, onDeleteFeature, isMock = false,
+  group, selectedPath, onSelect, onDelete, onDeleteFeature, isMock = false,
 }: FeatureCardProps) {
   const [expanded, setExpanded] = useState(true);
   const { meta, tests } = group;
 
-  const allPassed = tests.every((t) => fileResults[t.relativePath]?.status === "passed");
-  const anyFailed = tests.some((t) => fileResults[t.relativePath]?.status === "failed");
-
   return (
-    <div className={clsx(
-      "rounded-xl border overflow-hidden transition-all",
-      anyFailed ? "border-red-500/20" : allPassed && tests.length > 0 ? "border-emerald-500/20" : "border-surface-600"
-    )}>
+    <div className="rounded-xl border overflow-hidden transition-all bg-surface-800/50 border-surface-600">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-surface-800 hover:bg-surface-700/80 transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-800/60 transition-colors text-left"
       >
         <div className={clsx(
-          "w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0",
+          "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
           meta.inputType === "swagger"
             ? "bg-violet-500/20 border border-violet-500/30"
             : "bg-sky-500/20 border border-sky-500/30"
         )}>
           {meta.inputType === "swagger"
-            ? <Globe className="w-3.5 h-3.5 text-violet-400" />
-            : <FileText className="w-3.5 h-3.5 text-sky-400" />}
+            ? <Globe className="w-4 h-4 text-violet-400" />
+            : <FileText className="w-4 h-4 text-sky-400" />}
         </div>
-
-        <div className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-slate-100 truncate">{meta.featureName}</p>
-            {isMock && (
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20 flex-shrink-0">
-                <FlaskConical className="w-2 h-2" />
-                Sample
-              </span>
-            )}
-            <span className="text-[10px] text-slate-500 flex-shrink-0">
-              {tests.length} test{tests.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-          {meta.description && (
-            <p className="text-[10px] text-slate-600 truncate mt-0.5">{meta.description}</p>
-          )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-100 truncate">{meta.featureName}</p>
+          <p className="text-[10px] text-slate-500 mt-0.5">{tests.length} test file{tests.length !== 1 ? "s" : ""}</p>
         </div>
-
         <div className="flex items-center gap-2 flex-shrink-0">
-          {anyFailed && <XCircle className="w-4 h-4 text-red-400" />}
-          {allPassed && tests.length > 0 && !anyFailed && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
           {!isMock && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onDeleteFeature(meta.slug); }}
               title="Delete feature"
-              className="p-1 rounded hover:bg-surface-600 text-slate-600 hover:text-red-400 transition-colors"
+              className="p-1.5 rounded hover:bg-surface-600 text-slate-600 hover:text-red-400 transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -195,7 +121,7 @@ function FeatureCard({
       </button>
 
       {expanded && (
-        <div className="bg-surface-900/50 p-3 space-y-1.5 animate-fade-in">
+        <div className="bg-surface-900/50 p-3 space-y-1.5 animate-fade-in border-t border-surface-600">
           {tests.length === 0 ? (
             <p className="text-xs text-slate-600 px-2 py-2">No test files in this feature</p>
           ) : (
@@ -204,8 +130,6 @@ function FeatureCard({
                 key={file.relativePath}
                 file={file}
                 isSelected={selectedPath === file.relativePath}
-                isRunning={runningPath === file.relativePath}
-                result={fileResults[file.relativePath] ?? null}
                 onSelect={onSelect}
                 onDelete={onDelete}
                 isMock={isMock}
@@ -220,18 +144,10 @@ function FeatureCard({
 
 export default function TestRepositoryTab() {
   const { features: realFeatures, isLoading, error, refresh, deleteTest, deleteFeature } = useTestRepository();
-  const { user } = useAuth();
 
   const [selectedTest, setSelectedTest] = useState<{ file: TestFileInfo; isMock: boolean } | null>(null);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [fileResults, setFileResults] = useState<Record<string, RunTestResult>>({});
-  const [runningPath, setRunningPath] = useState<string | null>(null);
-  const [liveOutput, setLiveOutput] = useState("");
-  const [liveProgress, setLiveProgress] = useState(0);
-  const [liveStatus, setLiveStatus] = useState("");
-  const consoleRef = useRef<HTMLDivElement>(null);
-  const pendingRunRef = useRef(false);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -240,10 +156,6 @@ export default function TestRepositoryTab() {
     window.addEventListener("qa-genius:repository-changed", onChanged);
     return () => window.removeEventListener("qa-genius:repository-changed", onChanged);
   }, [refresh]);
-
-  useEffect(() => {
-    if (consoleRef.current) consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-  }, [liveOutput]);
 
   useEffect(() => {
     if (!selectedTest) {
@@ -272,93 +184,22 @@ export default function TestRepositoryTab() {
   const showMockData = !isLoading && !error && realFeatures.length === 0;
   const features: FeatureGroup[] = showMockData ? MOCK_FEATURES : realFeatures;
 
-  // Listen for run requests from the History tab
-  useEffect(() => {
-    const onRunInRepository = (event: Event) => {
-      const file = (event as CustomEvent<{ file: TestFileInfo }>).detail?.file;
-      if (!file) return;
-      pendingRunRef.current = true;
-      setSelectedTest({ file, isMock: false });
-      setLiveOutput("");
-      setLiveProgress(0);
-      setLiveStatus("");
-    };
-    window.addEventListener("qa-genius:run-test-in-repository", onRunInRepository);
-    return () => window.removeEventListener("qa-genius:run-test-in-repository", onRunInRepository);
-  }, []);
-
   const handleSelect = useCallback((file: TestFileInfo) => {
     setSelectedTest({ file, isMock: showMockData });
-    setLiveOutput("");
-    setLiveProgress(0);
-    setLiveStatus("");
   }, [showMockData]);
 
-  const handleRun = useCallback(async () => {
-    if (!selectedTest) return;
+  const handleRunInGenerator = useCallback(() => {
+    if (!selectedTest || previewLoading || !previewCode) return;
     const { file, isMock } = selectedTest;
-
-    setRunningPath(file.relativePath);
-    setLiveOutput("");
-    setLiveProgress(0);
-    setLiveStatus("Initializing…");
-
-    try {
-      const isCloudDeploy = shouldUseGitHubCloudRunner();
-      const githubToken = requireGitHubTokenForCloudRun();
-      const cloudCode = isMock ? MOCK_CODE_MAP[file.relativePath] : undefined;
-
-      if (isMock && !githubToken) {
-        const result = await simulateMockRun(
-          file,
-          (msg, progress) => { setLiveStatus(msg); setLiveProgress(progress); },
-          (chunk) => setLiveOutput((p) => p + chunk)
-        );
-        setFileResults((p) => ({ ...p, [file.relativePath]: result }));
-        setLiveProgress(100);
-        return;
-      }
-
-      if (isCloudDeploy && !githubToken) {
-        setLiveOutput("Error: Add a GitHub PAT in Settings → Cloud Test Runner to execute tests in the cloud.");
-        return;
-      }
-
-      const finalResult = await executeTestRun(
-        {
-          relativePath: file.relativePath,
-          ...(cloudCode ? { code: cloudCode } : {}),
-        },
-        {
-          onStatus: (msg, pct) => { setLiveStatus(msg); setLiveProgress(pct); },
-          onOutputAppend: (chunk) => setLiveOutput((p) => p + chunk),
-          onOutputReplace: (text) => setLiveOutput(text),
-          onResult: (runResult) => {
-            setFileResults((p) => ({ ...p, [file.relativePath]: runResult }));
-          },
-        }
-      );
-
-      if (finalResult) {
-        setLiveOutput(finalResult.output);
-        setLiveProgress(100);
-      }
-    } catch (e) {
-      setLiveOutput(`Error: ${e instanceof Error ? e.message : "Unknown error"}`);
-    } finally {
-      setRunningPath(null);
-      setLiveStatus("");
-    }
-  }, [selectedTest]);
-
-  // Fire run after a cross-tab select (from History)
-  useEffect(() => {
-    if (pendingRunRef.current && selectedTest) {
-      pendingRunRef.current = false;
-      handleRun();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTest]);
+    const group = features.find((g) => g.meta.slug === file.featureSlug);
+    routeRunToGenerator({
+      file,
+      code: previewCode,
+      isMock,
+      inputType: group?.meta.inputType,
+      autoRun: true,
+    });
+  }, [selectedTest, previewLoading, previewCode, features]);
 
   const handleDelete = (file: TestFileInfo) => {
     if (!window.confirm(`Delete "${file.fileName}"?\nThis cannot be undone.`)) return;
@@ -379,202 +220,103 @@ export default function TestRepositoryTab() {
 
   const totalTests = features.reduce((acc, f) => acc + f.tests.length, 0);
   const featuresLabel = showMockData ? "sample features" : "features";
-  const isRunning = runningPath !== null;
-  const selectedResult = selectedTest ? fileResults[selectedTest.file.relativePath] ?? null : null;
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* ── Feature tree ── */}
-      <div className="w-[420px] flex-shrink-0 border-r border-surface-600 flex flex-col">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-600 bg-surface-800/30">
-          <div className="flex items-center gap-2">
+      <SidebarPanel width="w-[420px]">
+        <PanelHeader>
+          <div className="flex items-center gap-2 min-w-0">
             {features.length > 0 ? (
-              <span className="text-xs bg-surface-600 text-slate-300 px-2 py-1 rounded-full">
+              <span className="text-xs bg-surface-700 text-slate-300 px-2.5 py-1 rounded-full border border-surface-600">
                 {features.length} {featuresLabel} · {totalTests} tests
               </span>
             ) : (
               <span className="text-xs text-slate-500">No saved tests yet</span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs text-slate-300 hover:text-white bg-surface-700 hover:bg-surface-600 rounded-lg transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={clsx("w-3 h-3", isLoading && "animate-spin")} /> Refresh
-          </button>
-        </div>
+          <SecondaryButton onClick={refresh} disabled={isLoading}>
+            <RefreshCw className={clsx("w-3.5 h-3.5", isLoading && "animate-spin")} />
+            Refresh
+          </SecondaryButton>
+        </PanelHeader>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {isLoading && (
-            <div className="flex items-center justify-center py-10 text-slate-500">
-              <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…
-            </div>
-          )}
-          {!isLoading && error && (
-            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">{error}</div>
-          )}
+        <PanelBody>
+          {isLoading && <LoadingState message="Loading tests…" />}
+          {!isLoading && error && <ErrorBanner>{error}</ErrorBanner>}
           {showMockData && (
-            <div className="flex items-center gap-2 bg-amber-500/8 border border-amber-500/20 rounded-xl px-3 py-2.5 text-xs text-amber-400">
-              <FlaskConical className="w-3.5 h-3.5 flex-shrink-0" />
+            <DemoBanner>
+              <FlaskConical className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span><strong>Demo</strong> — sample files for preview. Generate real tests in the Generator tab.</span>
-            </div>
+            </DemoBanner>
           )}
           {features.map((group) => (
             <FeatureCard
               key={group.meta.slug}
               group={group}
               selectedPath={selectedTest?.file.relativePath ?? null}
-              fileResults={fileResults}
-              runningPath={runningPath}
               onSelect={handleSelect}
               onDelete={handleDelete}
               onDeleteFeature={handleDeleteFeature}
               isMock={showMockData}
             />
           ))}
-        </div>
-      </div>
+        </PanelBody>
+      </SidebarPanel>
 
-      {/* ── Preview + Run + Console ── */}
-      <div className="flex-1 min-w-0 flex flex-col bg-surface-900">
+      <div className="qa-main-pane flex flex-col">
         {!selectedTest ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-600 gap-3">
-            <FileCode2 className="w-12 h-12 opacity-20" />
-            <p className="text-sm">Select a test file from the list on the left</p>
-          </div>
+          <EmptyState
+            icon={FileCode2}
+            accent="emerald"
+            title="Select a test to preview"
+            description="Choose a test file from the list on the left to view its source code."
+            hint='Click "Run Test" to open Test Generator and execute with the full-width terminal.'
+          />
         ) : (
           <>
-            {/* Header + Run button */}
-            <div className="flex-shrink-0 flex items-center justify-between gap-4 px-5 py-3 border-b border-surface-600 bg-surface-800">
+            <div className="flex-shrink-0 flex items-center justify-between gap-4 px-5 py-3 border-b border-surface-600 bg-surface-800/40">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-100 truncate">{selectedTest.file.fileName}</p>
                 <p className="text-[11px] font-mono text-slate-500 truncate">{selectedTest.file.relativePath}</p>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {selectedResult && (
-                  <span className={clsx(
-                    "text-[10px] font-bold px-2 py-1 rounded uppercase",
-                    selectedResult.status === "passed" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
-                  )}>
-                    {selectedResult.status}
-                  </span>
+              <button
+                type="button"
+                onClick={handleRunInGenerator}
+                disabled={previewLoading || !previewCode}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-lg shadow-emerald-900/30 transition-all"
+              >
+                {previewLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-white" />
+                    <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                  </>
                 )}
-                <button
-                  type="button"
-                  onClick={handleRun}
-                  disabled={isRunning}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-lg shadow-emerald-900/30 transition-all"
-                >
-                  {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-white" />}
-                  {isRunning ? "Running…" : "Run Test"}
-                </button>
-              </div>
+                {previewLoading ? "Loading…" : "Run Test"}
+              </button>
             </div>
 
-            {/* Code preview */}
-            <div className="flex-shrink-0 h-[38%] min-h-[160px] border-b border-surface-600 flex flex-col">
-              <div className="flex items-center gap-2 px-5 py-2 bg-surface-800/60 border-b border-surface-700">
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="flex items-center gap-2 px-5 py-2 border-b border-surface-700 bg-surface-800/40">
                 <FileCode2 className="w-3.5 h-3.5 text-slate-500" />
                 <span className="text-[11px] text-slate-400 uppercase tracking-wider">Source Preview</span>
                 {selectedTest.isMock && (
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Sample</span>
                 )}
               </div>
-              <div className="flex-1 overflow-auto p-4 bg-surface-950/50">
+              <div className="flex-1 overflow-auto p-5 bg-surface-950/50">
                 {previewLoading ? (
-                  <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading code…
-                  </div>
+                  <LoadingState message="Loading code…" />
                 ) : (
-                  <pre className="text-[11px] font-mono text-slate-300 leading-5 whitespace-pre-wrap">{previewCode}</pre>
+                  <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap">{previewCode}</pre>
                 )}
               </div>
             </div>
 
-            {/* Terminal output + failure artifacts */}
-            <div className="flex-1 min-h-0 flex">
-              <div className="flex-1 min-w-0 flex flex-col">
-                <div className="flex items-center justify-between px-5 py-2 border-b border-surface-700 bg-surface-800/40">
-                  <div className="flex items-center gap-2">
-                    <Terminal className="w-3.5 h-3.5 text-slate-500" />
-                    <span className="text-[11px] text-slate-400 font-mono">Playwright Output</span>
-                  </div>
-                  {isRunning && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-sky-400">{liveStatus}</span>
-                      <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin" />
-                    </div>
-                  )}
-                </div>
-
-                {isRunning && (
-                  <div className="h-0.5 bg-surface-700 flex-shrink-0">
-                    <div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${liveProgress}%` }} />
-                  </div>
-                )}
-
-                <div ref={consoleRef} className="flex-1 overflow-auto p-4 font-mono text-xs leading-5">
-                  {liveOutput ? (
-                    liveOutput.split("\n").map((line, i) => (
-                      <div
-                        key={i}
-                        className={
-                          /✓|passed|PASS/i.test(line) ? "text-emerald-400"
-                          : /✗|failed|FAIL|error/i.test(line) ? "text-red-400"
-                          : /warn|⚠/i.test(line) ? "text-yellow-400"
-                          : /^\s+at\s/.test(line) ? "text-slate-600"
-                          : "text-slate-300"
-                        }
-                      >
-                        {line || "\u00A0"}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-600 text-sm gap-2">
-                      <Terminal className="w-8 h-8 opacity-20" />
-                      <p>Click <strong className="text-slate-400">Run Test</strong> to start execution</p>
-                    </div>
-                  )}
-                  {isRunning && <span className="inline-block w-2 h-3 bg-sky-400 animate-pulse mt-1" />}
-                </div>
-              </div>
-
-              <div className="w-[280px] flex-shrink-0 hidden md:flex">
-                <ArtifactsGallery
-                  cloudRunId={selectedResult?.cloudRunId}
-                  htmlUrl={selectedResult?.htmlUrl}
-                  enabled={selectedResult?.status === "failed" && !isRunning && Boolean(selectedResult?.cloudRunId)}
-                />
-              </div>
-            </div>
-
-            {/* Failure banner — same UX as Test Generator */}
-            {selectedResult?.status === "failed" && !isRunning && (
-              <div className="flex-shrink-0 px-4 pb-4">
-                <FailureAnalyzer
-                  errorDetails={selectedResult.errorDetails ?? ""}
-                  failureLog={getActionableFailureLogs(selectedResult, liveOutput)}
-                  testCode={previewCode ?? ""}
-                  hasCoralogix={!!user?.hasCoralogix}
-                  onAnalyze={() => routeFailureLogsToAnalyzer(
-                    getActionableFailureLogs(selectedResult, liveOutput),
-                    "playwright"
-                  )}
-                  onAnalyzeWithGitHubLogs={() => routeFailureLogsToAnalyzer(
-                    getActionableFailureLogs(selectedResult, liveOutput),
-                    "playwright"
-                  )}
-                  onOpenSettings={() =>
-                    window.dispatchEvent(new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "settings" } }))
-                  }
-                  isAnalyzing={false}
-                  mcpSteps={[]}
-                  analysis={null}
-                />
-              </div>
-            )}
+            <p className="flex-shrink-0 px-5 py-2 text-[11px] text-slate-500 border-t border-surface-700 bg-surface-900/50">
+              Runs open in <strong className="text-slate-400">Test Generator</strong> for full terminal width, screenshots, and AI failure analysis.
+            </p>
           </>
         )}
       </div>

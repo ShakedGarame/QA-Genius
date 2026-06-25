@@ -291,6 +291,7 @@ router.get("/run-test/cloud-logs/:runId", async (req: Request, res: Response) =>
       output: status.output,
       rawLogs: status.rawLogs,
       errorDetails: status.errorDetails,
+      durationMs: status.durationMs,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch cloud logs";

@@ -250,7 +250,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
             />
           ))}
           <a
-            href="https://github.com/shakedgarame"
+            href="https://github.com/ShakedGarame/QA-Genius"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors rounded-lg px-3 py-2 mt-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
@@ -325,7 +325,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
         </header>
 
         {/* Desktop page title bar — UserDropdown lives here */}
-        <header className="hidden lg:flex flex-shrink-0 items-center justify-between px-6 py-3 border-b border-surface-600 bg-surface-900/50">
+        <header className="hidden lg:flex flex-shrink-0 items-center justify-between px-6 py-3 border-b border-surface-600 bg-surface-800/40 backdrop-blur-sm">
           <div>
             <h2 className="text-lg font-semibold text-white">{activeItem.label}</h2>
             <p className="text-sm text-slate-500 mt-0.5">{activeItem.description}</p>

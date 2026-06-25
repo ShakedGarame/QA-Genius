@@ -49,6 +49,37 @@
   }
 }
 
+@layer components {
+  /* Shared QA-Genius surface tokens — use via layout.tsx components */
+  .qa-main-pane {
+    @apply flex-1 min-w-0 flex flex-col bg-surface-900;
+  }
+
+  .qa-data-table {
+    @apply w-full text-left text-xs;
+  }
+
+  .qa-data-table thead {
+    @apply bg-surface-800 text-slate-500 uppercase tracking-wider;
+  }
+
+  .qa-data-table th {
+    @apply px-4 py-2.5 font-medium;
+  }
+
+  .qa-data-table tbody {
+    @apply divide-y divide-surface-700;
+  }
+
+  .qa-data-table tr {
+    @apply hover:bg-surface-800/40 transition-colors;
+  }
+
+  .qa-data-table td {
+    @apply px-4 py-2.5;
+  }
+}
+
 @layer utilities {
   .text-gradient {
     background: linear-gradient(135deg, #38bdf8, #818cf8);
