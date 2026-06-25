@@ -99,18 +99,20 @@ jobs:
         env:
           BASE_URL: ${{ github.event.client_payload.base_url || 'https://example.com' }}
           CI: "true"
+          # CI=true causes Playwright to run headless automatically — no --headed flag needed
         run: |
           TEST_PATH="tests/generated/${{ github.event.client_payload.relative_path }}"
           echo "Running: npx playwright test ${TEST_PATH}"
           npx playwright test "${TEST_PATH}" \
             --config=playwright.config.ts \
             --reporter=list,html \
-            --workers=1 \
-            --headed=false
+            --workers=1
 
       # ── Upload failure artifacts ─────────────────────────────────────────────
+      # always() ensures this step runs even when the test step exits with code 1.
+      # if-no-files-found: ignore makes it a safe no-op when tests pass (no test-results/).
       - name: Upload Playwright failure artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-failure-${{ github.run_id }}
