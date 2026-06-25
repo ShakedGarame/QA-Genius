@@ -21,6 +21,7 @@ export interface GenerateTestsResult {
 
 export interface RunTestResult {
   testId: string;
+  testRunId?: string;
   status: "passed" | "failed" | "error" | "running";
   output: string;
   duration: number;
@@ -29,6 +30,44 @@ export interface RunTestResult {
   htmlUrl?: string;
   rawLogs?: string;
   runner?: string;
+}
+
+export type TestRunStatus = "RUNNING" | "PASSED" | "FAILED";
+
+export interface TestRunRecord {
+  id: string;
+  user_id: string;
+  test_file_id: string | null;
+  feature_name: string;
+  test_file_name: string | null;
+  relative_path: string | null;
+  status: TestRunStatus;
+  duration_ms: number;
+  github_run_id: string | null;
+  runner: string | null;
+  html_url: string | null;
+  artifact_meta: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DashboardStats {
+  totalRuns: number;
+  passRatePercent: number;
+  averageDurationMs: number;
+  recentRuns: TestRunRecord[];
+}
+
+export interface RunArtifactInfo {
+  id: number;
+  name: string;
+  sizeBytes: number;
+}
+
+export interface RunArtifactGallery {
+  runId: number;
+  artifacts: RunArtifactInfo[];
+  screenshots: Array<{ name: string; dataUrl: string }>;
 }
 
 export interface McpLog {

@@ -121,7 +121,6 @@ export async function getWorkflowRun(token: string, runId: number): Promise<Work
   };
 }
 
-/** Download and extract the full GitHub Actions log archive for a workflow run. */
 export async function fetchRawWorkflowLogs(token: string, runId: number): Promise<string> {
   const { owner, repo } = parseRepo();
   const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/logs`, {
@@ -145,6 +144,81 @@ export async function fetchRawWorkflowLogs(token: string, runId: number): Promis
   }
 
   return parts.join("\n").trim() || "No log files found in GitHub Actions archive.";
+}
+
+export interface WorkflowArtifactInfo {
+  id: number;
+  name: string;
+  sizeBytes: number;
+}
+
+export interface RunArtifactGallery {
+  artifacts: WorkflowArtifactInfo[];
+  screenshots: Array<{ name: string; dataUrl: string }>;
+}
+
+async function downloadArtifactZip(token: string, artifactId: number): Promise<Buffer> {
+  const { owner, repo } = parseRepo();
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`,
+    { headers: githubHeaders(token), redirect: "follow" }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Artifact download failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** List workflow artifacts and extract failure screenshot thumbnails from zip archives. */
+export async function fetchRunArtifacts(token: string, runId: number): Promise<RunArtifactGallery> {
+  const { owner, repo } = parseRepo();
+  const data = await githubJson<{
+    artifacts: Array<{ id: number; name: string; size_in_bytes: number }>;
+  }>(token, `/repos/${owner}/${repo}/actions/runs/${runId}/artifacts`);
+
+  const artifacts: WorkflowArtifactInfo[] = (data.artifacts ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    sizeBytes: a.size_in_bytes,
+  }));
+
+  const screenshots: Array<{ name: string; dataUrl: string }> = [];
+
+  // Accept ANY artifact whose name looks related to playwright/failures; also
+  // accept all artifacts when there is only one (common pattern for the
+  // playwright-failure-<runId> artifact naming in our workflow).
+  const candidateArtifacts =
+    artifacts.length === 1
+      ? artifacts
+      : artifacts.filter((a) => /playwright|test.?results?|screenshot|failure/i.test(a.name));
+
+  for (const artifact of candidateArtifacts) {
+    try {
+      const zipBuffer = await downloadArtifactZip(token, artifact.id);
+      const zip = new AdmZip(zipBuffer);
+      for (const entry of zip.getEntries()) {
+        if (entry.isDirectory) continue;
+        const lower = entry.entryName.toLowerCase();
+        // Accept PNG, JPEG, WEBP screenshots
+        if (!/\.(png|jpe?g|webp)$/.test(lower)) continue;
+        // Skip tiny files (icons, logos) – real screenshots are typically >5 KB
+        const data = entry.getData();
+        if (data.length < 4 * 1024) continue;
+        const base64 = data.toString("base64");
+        const ext = lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "jpeg" : lower.endsWith(".webp") ? "webp" : "png";
+        const fileName = entry.entryName.split("/").pop() ?? entry.entryName;
+        screenshots.push({
+          name: fileName,
+          dataUrl: `data:image/${ext};base64,${base64}`,
+        });
+      }
+    } catch (err) {
+      console.warn(`[artifacts] Could not read zip for artifact ${artifact.id} (${artifact.name}):`, err);
+    }
+  }
+
+  return { artifacts, screenshots };
 }
 
 function extractFailureSnippet(rawLogs: string): string {

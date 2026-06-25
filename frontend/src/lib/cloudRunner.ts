@@ -1,13 +1,29 @@
 import { RunTestResult } from "../types";
 import { buildGitHubTokenHeaders, readGitHubTokenForRequest } from "./githubToken";
+import { finishTestRun, mapResultStatus } from "./testRuns";
+import { fetchRunArtifacts } from "./artifacts";
 
 const ANALYZER_PENDING_KEY = "qa-genius:pending-analyzer";
+
+/** Poll every ~4.5s for up to ~15 minutes (matches workflow timeout). */
+export const CLOUD_RUN_POLL = {
+  maxAttempts: 200,
+  delayMs: 4500,
+} as const;
 
 export interface AnalyzerRoutePayload {
   logs: string;
   source: string;
   autoTrigger: boolean;
   ts: number;
+}
+
+/** Use GitHub Actions cloud runner on Vercel, localhost with PAT, or when env flag is set. */
+export function shouldUseGitHubCloudRunner(): boolean {
+  if (typeof window === "undefined") return false;
+  if (/vercel\.app$/i.test(window.location.hostname)) return true;
+  if (import.meta.env.VITE_USE_GITHUB_ACTIONS === "true") return true;
+  return Boolean(readGitHubTokenForRequest());
 }
 
 export async function pollCloudRunStatus(workflowRunId: number): Promise<RunTestResult> {
@@ -20,7 +36,6 @@ export async function pollCloudRunStatus(workflowRunId: number): Promise<RunTest
 
   const ghStatus = String(json.status ?? "unknown");
 
-  // GitHub runs are queued/in_progress until status === "completed"
   if (ghStatus !== "completed") {
     return {
       testId: String(workflowRunId),
@@ -63,6 +78,39 @@ function mapCloudStatusToResult(workflowRunId: number, json: Record<string, unkn
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Persist final run outcome to Supabase when a db run id is known. */
+export async function persistRunCompletion(
+  testRunId: string | undefined,
+  result: RunTestResult
+): Promise<void> {
+  if (!testRunId || result.status === "running") return;
+
+  let artifactMeta: Record<string, unknown> | null = null;
+  if (result.status === "failed" && result.cloudRunId) {
+    const gallery = await fetchRunArtifacts(result.cloudRunId);
+    if (gallery) {
+      artifactMeta = {
+        artifactCount: gallery.artifacts.length,
+        screenshotCount: gallery.screenshots.length,
+        artifactNames: gallery.artifacts.map((a) => a.name),
+      };
+    }
+  }
+
+  await finishTestRun(testRunId, {
+    status: mapResultStatus(result.status),
+    durationMs: result.duration,
+    gitHubRunId: result.cloudRunId,
+    htmlUrl: result.htmlUrl,
+    runner: result.runner,
+    artifactMeta,
+  });
+}
+
 /** Poll until GitHub Actions run completes, then download raw logs on failure. */
 export async function waitForCloudRunCompletion(
   workflowRunId: number,
@@ -72,25 +120,31 @@ export async function waitForCloudRunCompletion(
   },
   options?: { maxAttempts?: number; delayMs?: number }
 ): Promise<RunTestResult> {
-  const maxAttempts = options?.maxAttempts ?? 40;
-  const delayMs = options?.delayMs ?? 5000;
+  const maxAttempts = options?.maxAttempts ?? CLOUD_RUN_POLL.maxAttempts;
+  const delayMs = options?.delayMs ?? CLOUD_RUN_POLL.delayMs;
 
   for (let i = 0; i < maxAttempts; i++) {
     const status = await pollCloudRunStatus(workflowRunId);
     handlers?.onOutput?.(status.output);
 
     if (status.status === "running") {
-      const pct = Math.min(90, 25 + i * 2);
-      const msg = status.output.includes("in_progress")
-        ? "🚀 Running Playwright in GitHub Actions…"
-        : "⏳ Waiting for GitHub Actions run…";
-      handlers?.onProgress?.(msg, pct);
-      await new Promise((r) => setTimeout(r, delayMs));
+      const pct = Math.min(92, 25 + Math.floor((i / maxAttempts) * 65));
+      const elapsedSec = Math.round(((i + 1) * delayMs) / 1000);
+      handlers?.onProgress?.(
+        `⏳ GitHub Actions running… (${elapsedSec}s elapsed)`,
+        pct
+      );
+      await sleep(delayMs);
       continue;
     }
 
+    if (status.status === "passed") {
+      handlers?.onProgress?.("✅ Cloud run passed", 100);
+      return status;
+    }
+
     if (status.status === "failed" && status.cloudRunId) {
-      handlers?.onProgress?.("📋 Downloading raw failure logs…", 95);
+      handlers?.onProgress?.("📋 Downloading raw failure logs…", 96);
       try {
         return await fetchCloudRunLogs(status.cloudRunId);
       } catch {
@@ -101,7 +155,22 @@ export async function waitForCloudRunCompletion(
     return status;
   }
 
-  return pollCloudRunStatus(workflowRunId);
+  handlers?.onProgress?.("⚠ Polling timed out — fetching latest status…", 94);
+  const last = await pollCloudRunStatus(workflowRunId);
+  if (last.status === "running") {
+    try {
+      return await fetchCloudRunLogs(workflowRunId);
+    } catch {
+      return {
+        ...last,
+        status: "failed",
+        output:
+          `${last.output}\n\n⚠ UI polling timed out after ~${Math.round((maxAttempts * delayMs) / 60000)} minutes.\n` +
+          "Check GitHub Actions directly for the final result.",
+      };
+    }
+  }
+  return last.status === "failed" ? await enrichFailedCloudRun(last) : last;
 }
 
 /** Ensure failed cloud runs include downloaded raw GitHub logs in the terminal. */
@@ -124,6 +193,138 @@ function hasSubstantialFailureLogs(result: RunTestResult): boolean {
     logs.includes("RAW GITHUB ACTIONS LOGS") ||
     /TimeoutError|Error:|FAIL|page\.goto|Navigation to/i.test(logs)
   );
+}
+
+/** Client-side fallback when backend SSE ends before GitHub run id is known. */
+export async function resolveDispatchRunId(
+  dispatchedAfterMs: number,
+  handlers?: {
+    onProgress?: (message: string, progress: number) => void;
+  }
+): Promise<number | undefined> {
+  for (let i = 0; i < 40; i++) {
+    handlers?.onProgress?.(
+      `🔍 Resolving GitHub run ID… (${i + 1}/40)`,
+      Math.min(24, 20 + i)
+    );
+
+    const res = await fetch(
+      `/api/run-test/find-dispatch?after=${dispatchedAfterMs}`,
+      { credentials: "include", headers: buildGitHubTokenHeaders() }
+    );
+    const json = await res.json();
+    if (res.ok && json.found && json.workflowRunId) {
+      return Number(json.workflowRunId);
+    }
+
+    await sleep(3000);
+  }
+  return undefined;
+}
+
+/** Resolve final cloud/local result after SSE stream ends. */
+export async function resolveCloudRunAfterStream(
+  streamResult: RunTestResult | undefined,
+  workflowRunId: number | undefined,
+  handlers?: {
+    onProgress?: (message: string, progress: number) => void;
+    onOutput?: (output: string) => void;
+  },
+  options?: { dispatchedAt?: number; testRunId?: string }
+): Promise<RunTestResult | null> {
+  let runId = streamResult?.cloudRunId ?? workflowRunId;
+
+  if (!runId && options?.dispatchedAt) {
+    runId = await resolveDispatchRunId(options.dispatchedAt, handlers);
+  }
+
+  const isCloudRun =
+    Boolean(runId) &&
+    (streamResult?.runner === "github-actions" ||
+      shouldUseGitHubCloudRunner() ||
+      !streamResult);
+
+  if (isCloudRun && runId) {
+    const result = await waitForCloudRunCompletion(runId, handlers, CLOUD_RUN_POLL);
+    return { ...result, testRunId: options?.testRunId ?? streamResult?.testRunId };
+  }
+
+  if (!streamResult) return null;
+
+  if (streamResult.status === "failed") {
+    return enrichFailedCloudRun(streamResult);
+  }
+
+  return streamResult;
+}
+
+export interface ExecuteTestRunHandlers {
+  onStatus?: (message: string, progress: number) => void;
+  onOutputAppend?: (chunk: string) => void;
+  onOutputReplace?: (text: string) => void;
+  onResult?: (result: RunTestResult) => void;
+}
+
+/** Unified run flow — used by Generator and Repository tabs. */
+export async function executeTestRun(
+  body: Record<string, unknown>,
+  handlers: ExecuteTestRunHandlers
+): Promise<RunTestResult | null> {
+  if (shouldUseGitHubCloudRunner() && !requireGitHubTokenForCloudRun()) {
+    handlers.onOutputAppend?.(
+      "Error: Add a GitHub PAT in Settings → Cloud Test Runner to run tests via GitHub Actions.\n"
+    );
+    return null;
+  }
+
+  const streamStartedAt = Date.now();
+  const res = await fetch("/api/run-test", {
+    method: "POST",
+    headers: buildRunTestHeaders(),
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+
+  const { pendingWorkflowRunId, streamResult, testRunId, dispatchStartedAt } =
+    await consumeRunTestStream(res, {
+      onStatus: handlers.onStatus,
+      onOutput: handlers.onOutputAppend,
+      onResult: handlers.onResult,
+    });
+
+  const finalResult = await resolveCloudRunAfterStream(
+    streamResult,
+    pendingWorkflowRunId,
+    {
+      onProgress: handlers.onStatus,
+      onOutput: handlers.onOutputReplace,
+    },
+    {
+      dispatchedAt: dispatchStartedAt ?? streamStartedAt,
+      testRunId,
+    }
+  );
+
+  if (!finalResult) return null;
+
+  const merged: RunTestResult = {
+    ...finalResult,
+    testRunId: finalResult.testRunId ?? testRunId,
+  };
+
+  handlers.onResult?.(merged);
+  handlers.onOutputReplace?.(merged.output);
+  handlers.onStatus?.(
+    merged.status === "passed"
+      ? "✅ Test passed"
+      : merged.status === "failed"
+        ? "❌ Test failed"
+        : "Run complete",
+    100
+  );
+
+  void persistRunCompletion(merged.testRunId, merged);
+  return merged;
 }
 
 /** Pick the best log text for AI analysis (raw logs preferred). */
@@ -155,13 +356,21 @@ export async function consumeRunTestStream(
     onResult?: (result: RunTestResult) => void;
     onWorkflowRunId?: (workflowRunId: number) => void;
   }
-): Promise<{ pendingWorkflowRunId?: number }> {
+): Promise<{
+  pendingWorkflowRunId?: number;
+  streamResult?: RunTestResult;
+  testRunId?: string;
+  dispatchStartedAt?: number;
+}> {
   if (!res.body) throw new Error("No response body");
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let pendingWorkflowRunId: number | undefined;
+  let streamResult: RunTestResult | undefined;
+  let testRunId: string | undefined;
+  let dispatchStartedAt: number | undefined;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -181,13 +390,26 @@ export async function consumeRunTestStream(
         const data = JSON.parse(dataLine);
         if (eventType === "status") {
           handlers.onStatus?.(data.message ?? "", data.progress ?? 0);
+        } else if (eventType === "started" && data.testRunId) {
+          testRunId = String(data.testRunId);
         } else if (eventType === "output") {
           handlers.onOutput?.(data.text ?? "");
         } else if (eventType === "result") {
-          handlers.onResult?.(data as RunTestResult);
+          streamResult = data as RunTestResult;
+          if (data.testRunId) testRunId = String(data.testRunId);
+          handlers.onResult?.(streamResult);
         } else if (eventType === "dispatched" && data.workflowRunId) {
           handlers.onWorkflowRunId?.(Number(data.workflowRunId));
           pendingWorkflowRunId = Number(data.workflowRunId);
+          if (data.testRunId) testRunId = String(data.testRunId);
+          if (data.dispatchedAt) dispatchStartedAt = Number(data.dispatchedAt);
+        } else if (eventType === "pending") {
+          if (data.dispatchedAt) dispatchStartedAt = Number(data.dispatchedAt);
+          if (data.testRunId) testRunId = String(data.testRunId);
+          handlers.onStatus?.(
+            String(data.message ?? "Resolving GitHub run ID…"),
+            22
+          );
         } else if (eventType === "error") {
           handlers.onOutput?.(`\n⚠ ${data.message}\n`);
         }
@@ -197,7 +419,7 @@ export async function consumeRunTestStream(
     }
   }
 
-  return { pendingWorkflowRunId };
+  return { pendingWorkflowRunId, streamResult, testRunId, dispatchStartedAt };
 }
 
 export function buildRunTestHeaders(): Record<string, string> {

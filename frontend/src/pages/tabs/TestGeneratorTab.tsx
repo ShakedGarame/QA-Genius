@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import {
   Play, Loader2, Sparkles, FileCode2, AlertCircle,
@@ -9,6 +9,7 @@ import clsx from "clsx";
 import StoryPanel from "../../components/qa-genius/StoryPanel";
 import TestEditor from "../../components/qa-genius/TestEditor";
 import ExecutionConsole from "../../components/qa-genius/ExecutionConsole";
+import ArtifactsGallery from "../../components/qa-genius/ArtifactsGallery";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
 import { useTestRunner } from "../../hooks/useTestRunner";
 import { useAuth } from "../../hooks/useAuth";
@@ -166,6 +167,7 @@ interface InputAreaProps {
 function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
   const [tab, setTab] = useState<"upload" | "paste">("upload");
   const [pasteText, setPasteText] = useState("");
+  const [pasteSaved, setPasteSaved] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -180,9 +182,9 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
     if (inputType === "swagger") {
       onReady({ swaggerContent: pasteText });
     } else {
-      // Parse user stories client-side for immediate display
       onReady({ prdText: pasteText });
     }
+    setPasteSaved(true);
   };
 
   const onDrop = useCallback((accepted: File[], rejected: { errors: readonly { message: string }[] }[]) => {
@@ -203,6 +205,10 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
     maxSize: 10 * 1024 * 1024,
     onDrop,
   });
+
+  useEffect(() => {
+    setPasteSaved(false);
+  }, [inputType, tab]);
 
   return (
     <div className="space-y-3">
@@ -262,19 +268,44 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
         <div className="space-y-2">
           <textarea
             value={pasteText}
-            onChange={(e) => setPasteText(e.target.value)}
+            onChange={(e) => {
+              setPasteText(e.target.value);
+              if (pasteSaved) setPasteSaved(false);
+            }}
             placeholder={placeholder}
             rows={8}
-            className="w-full bg-surface-800 border border-surface-600 rounded-lg px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono resize-none"
+            className={clsx(
+              "w-full bg-surface-800 border rounded-lg px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono resize-none",
+              pasteSaved ? "border-emerald-500/40" : "border-surface-600"
+            )}
           />
-          <button
-            onClick={handlePasteSubmit}
-            disabled={!pasteText.trim() || isLoading}
-            className="flex items-center gap-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-medium transition-colors"
-          >
-            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-            Parse
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handlePasteSubmit}
+              disabled={!pasteText.trim() || isLoading || pasteSaved}
+              className={clsx(
+                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all",
+                pasteSaved
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default"
+                  : "bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white"
+              )}
+            >
+              {isLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : pasteSaved ? (
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              ) : (
+                <FileText className="w-3.5 h-3.5" />
+              )}
+              {isLoading ? "Parsing…" : pasteSaved ? "Saved" : "Parse"}
+            </button>
+            {pasteSaved && (
+              <span className="text-[11px] text-emerald-400/90">
+                Text saved — ready for Generate
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -664,13 +695,27 @@ export default function TestGeneratorTab() {
                 onChange={setEditedCode}
                 fileName={savedAs ?? "generated.spec.ts"}
               />
-              <ExecutionConsole
-                output={output}
-                result={runResult}
-                isRunning={isRunning}
-                progress={progress}
-                statusMessage={statusMessage}
-              />
+              <div className="min-h-0 flex flex-col gap-3">
+                <div className="flex-1 min-h-0">
+                  <ExecutionConsole
+                    output={output}
+                    result={runResult}
+                    isRunning={isRunning}
+                    progress={progress}
+                    statusMessage={statusMessage}
+                  />
+                </div>
+                {runResult?.status === "failed" && !isRunning && Boolean(runResult?.cloudRunId) && (
+                  <div className="flex-shrink-0 max-h-[260px]">
+                    <ArtifactsGallery
+                      cloudRunId={runResult.cloudRunId}
+                      htmlUrl={runResult.htmlUrl}
+                      enabled={true}
+                      layout="row"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {showFailureAnalyzer && (

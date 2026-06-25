@@ -47,10 +47,10 @@ export default function ExecutionConsole({
           {isRunning && (
             <span className="flex items-center gap-1.5 text-xs text-sky-400">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              {statusMessage ?? "Running…"}
+              {statusMessage ?? "RUNNING"}
             </span>
           )}
-          {result && !isRunning && (
+          {result && !isRunning && result.status !== "running" && (
             <span
               className={clsx(
                 "flex items-center gap-1 text-xs font-semibold",
@@ -62,7 +62,7 @@ export default function ExecutionConsole({
               ) : (
                 <XCircle className="w-3.5 h-3.5" />
               )}
-              {result.status.toUpperCase()}
+              {result.status === "passed" ? "PASSED" : "FAILED"}
               {result.duration > 0 && (
                 <span className="text-slate-500 font-normal ml-1">
                   ({(result.duration / 1000).toFixed(1)}s)

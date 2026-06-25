@@ -1,13 +1,7 @@
 import { useState, useCallback } from "react";
 import { RunTestResult, FailureAnalysis, McpStep } from "../types";
 import { buildOpenAIKeyHeaders } from "../lib/apiKeys";
-import {
-  buildRunTestHeaders,
-  consumeRunTestStream,
-  waitForCloudRunCompletion,
-  enrichFailedCloudRun,
-  requireGitHubTokenForCloudRun,
-} from "../lib/cloudRunner";
+import { executeTestRun } from "../lib/cloudRunner";
 
 export function useTestRunner() {
   const [isRunning, setIsRunning] = useState(false);
@@ -29,56 +23,15 @@ export function useTestRunner() {
     setMcpSteps([]);
 
     try {
-      let workflowRunId: number | undefined;
-      let gotResult = false;
-      let streamResult: RunTestResult | undefined;
-      const isCloudDeploy = /vercel\.app$/i.test(window.location.hostname);
-
-      if (isCloudDeploy && !requireGitHubTokenForCloudRun()) {
-        setOutput("Error: Add a GitHub PAT in Settings → Cloud Test Runner to run tests in the cloud on Vercel.");
-        return;
-      }
-
-      const res = await fetch("/api/run-test", {
-        method: "POST",
-        headers: buildRunTestHeaders(),
-        credentials: "include",
-        body: JSON.stringify({ code }),
-      });
-
-      await consumeRunTestStream(res, {
-        onStatus: (msg, progress) => {
+      await executeTestRun({ code }, {
+        onStatus: (msg, pct) => {
           setStatusMessage(msg);
-          setProgress(progress);
+          setProgress(pct);
         },
-        onOutput: (chunk) => setOutput((prev) => prev + chunk),
-        onResult: (r) => {
-          gotResult = true;
-          streamResult = r;
-        },
-        onWorkflowRunId: (id) => { workflowRunId = id; },
+        onOutputAppend: (chunk) => setOutput((prev) => prev + chunk),
+        onOutputReplace: (text) => setOutput(text),
+        onResult: (runResult) => setResult(runResult),
       });
-
-      if (streamResult) {
-        const finalResult =
-          streamResult.status === "failed"
-            ? await enrichFailedCloudRun(streamResult)
-            : streamResult;
-        setResult(finalResult);
-        setOutput(finalResult.output);
-        setProgress(100);
-      } else if (workflowRunId) {
-        const finalResult = await waitForCloudRunCompletion(workflowRunId, {
-          onProgress: (msg, pct) => {
-            setStatusMessage(msg);
-            setProgress(pct);
-          },
-          onOutput: (text) => setOutput(text),
-        });
-        setResult(finalResult);
-        setOutput(finalResult.output);
-        setProgress(100);
-      }
     } catch (e) {
       setOutput(`Error: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {

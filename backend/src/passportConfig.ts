@@ -2,7 +2,9 @@ import passport from "passport";
 import { Strategy as GitHubStrategy, Profile as GitHubProfile } from "passport-github2";
 import { Strategy as GoogleStrategy, Profile as GoogleProfile } from "passport-google-oauth20";
 import { VerifyCallback } from "passport-oauth2";
-import { findUserById, upsertGithubUser, upsertGoogleUser } from "./db.js";
+import { findUserById, upsertGithubUser, upsertGoogleUser, buildLocalDevGuest } from "./db.js";
+
+const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
 
 passport.serializeUser((user, done) => {
   done(null, (user as { id: string }).id);
@@ -11,8 +13,15 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser(async (id: string, done) => {
   try {
     const user = await findUserById(id);
-    done(null, user ?? false);
+    if (user) return done(null, user);
+    if (!isProduction && id === buildLocalDevGuest().id) {
+      return done(null, buildLocalDevGuest());
+    }
+    done(null, false);
   } catch (err) {
+    if (!isProduction && id === buildLocalDevGuest().id) {
+      return done(null, buildLocalDevGuest());
+    }
     done(err);
   }
 });

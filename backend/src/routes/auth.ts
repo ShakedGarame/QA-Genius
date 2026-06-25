@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import passport from "../passportConfig.js";
-import { getUserSettings, upsertUserSettings, upsertGithubUser } from "../db.js";
+import { getOrCreateGuestUser, getUserSettings, upsertUserSettings } from "../db.js";
 import type { DbUser } from "../db.js";
 
 const router = Router();
@@ -26,18 +26,8 @@ router.get("/api/auth/providers", (_req: Request, res: Response) => {
 // for portfolio demos (visitors see the same pre-generated data).
 
 router.post("/api/auth/mock-login", async (req: Request, res: Response) => {
-  const provider = (req.body as { provider?: string }).provider ?? "github";
-
   try {
-    const guestUser = await upsertGithubUser({
-      githubId: "mock_user_123",
-      email: "guest@qa-genius.com",
-      name: "Guest Developer",
-      avatarUrl:
-        provider === "google"
-          ? "https://lh3.googleusercontent.com/a/mock-google-avatar"
-          : "https://avatars.githubusercontent.com/u/0?v=4",
-    });
+    const guestUser = await getOrCreateGuestUser();
 
     req.login(guestUser, (err) => {
       if (err) return res.status(500).json({ error: "Login failed" });

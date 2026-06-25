@@ -2,6 +2,7 @@
  * PostgreSQL data layer (Supabase) — users, settings, features, tests, log analyses.
  */
 import { randomUUID } from "crypto";
+import { Prisma } from "@prisma/client";
 import prisma from "./prisma.js";
 import type { FeatureGroup, FeatureMeta, InputType, TestFileInfo } from "./types/index.js";
 
@@ -86,8 +87,43 @@ function mapSettings(row: {
 }
 
 export async function findUserById(id: string): Promise<DbUser | undefined> {
-  const row = await prisma.user.findUnique({ where: { id } });
-  return row ? mapUser(row) : undefined;
+  try {
+    const row = await prisma.user.findUnique({ where: { id } });
+    return row ? mapUser(row) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Stable in-memory guest used when Supabase is temporarily unreachable locally. */
+export function buildLocalDevGuest(): DbUser {
+  return {
+    id: "local-dev-guest",
+    github_id: "mock_user_123",
+    google_id: null,
+    email: "guest@qa-genius.com",
+    name: "Guest Developer",
+    avatar_url: "https://avatars.githubusercontent.com/u/0?v=4",
+    created_at: new Date().toISOString(),
+    last_login: new Date().toISOString(),
+  };
+}
+
+export async function getOrCreateGuestUser(): Promise<DbUser> {
+  try {
+    return await upsertGithubUser({
+      githubId: "mock_user_123",
+      email: "guest@qa-genius.com",
+      name: "Guest Developer",
+      avatarUrl: "https://avatars.githubusercontent.com/u/0?v=4",
+    });
+  } catch (err) {
+    console.warn(
+      "[auth] Supabase unreachable — using offline guest:",
+      err instanceof Error ? err.message : err
+    );
+    return buildLocalDevGuest();
+  }
 }
 
 export async function upsertGithubUser(profile: {
@@ -404,4 +440,189 @@ export async function getLogAnalysisById(
 export async function deleteLogAnalysis(userId: string, id: string): Promise<boolean> {
   const result = await prisma.logAnalysis.deleteMany({ where: { id, userId } });
   return result.count > 0;
+}
+
+// ─── Test runs (execution history) ───────────────────────────────────────────
+
+export type TestRunStatus = "RUNNING" | "PASSED" | "FAILED";
+
+export interface DbTestRun {
+  id: string;
+  user_id: string;
+  test_file_id: string | null;
+  feature_name: string;
+  test_file_name: string | null;
+  relative_path: string | null;
+  status: TestRunStatus;
+  duration_ms: number;
+  github_run_id: string | null;
+  runner: string | null;
+  html_url: string | null;
+  artifact_meta: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapTestRun(row: {
+  id: string;
+  userId: string;
+  testFileId: string | null;
+  featureName: string;
+  testFileName: string | null;
+  relativePath: string | null;
+  status: string;
+  durationMs: number;
+  gitHubRunId: string | null;
+  runner: string | null;
+  htmlUrl: string | null;
+  artifactMeta: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}): DbTestRun {
+  return {
+    id: row.id,
+    user_id: row.userId,
+    test_file_id: row.testFileId,
+    feature_name: row.featureName,
+    test_file_name: row.testFileName,
+    relative_path: row.relativePath,
+    status: row.status as TestRunStatus,
+    duration_ms: row.durationMs,
+    github_run_id: row.gitHubRunId,
+    runner: row.runner,
+    html_url: row.htmlUrl,
+    artifact_meta: (row.artifactMeta as Record<string, unknown> | null) ?? null,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+export async function resolveGeneratedTestId(
+  userId: string,
+  relativePath?: string
+): Promise<string | null> {
+  if (!relativePath) return null;
+  const parts = relativePath.split("/");
+  if (parts.length < 2) return null;
+  const slug = parts[0];
+  const fileName = parts.slice(1).join("/");
+  const feature = await prisma.feature.findUnique({
+    where: { userId_slug: { userId, slug } },
+    include: { tests: { where: { fileName } } },
+  });
+  return feature?.tests[0]?.id ?? null;
+}
+
+export async function getFeatureNameBySlug(userId: string, slug: string): Promise<string | null> {
+  const feature = await prisma.feature.findUnique({
+    where: { userId_slug: { userId, slug } },
+    select: { featureName: true },
+  });
+  return feature?.featureName ?? null;
+}
+
+export function normalizeGitHubRunId(value: number | string | null | undefined): string | null {
+  if (value == null || value === "") return null;
+  return String(value);
+}
+
+export async function createTestRun(
+  userId: string,
+  data: {
+    testFileId?: string | null;
+    featureName: string;
+    testFileName?: string | null;
+    relativePath?: string | null;
+    gitHubRunId?: number | string | null;
+    runner?: string;
+  }
+): Promise<DbTestRun> {
+  const row = await prisma.testRun.create({
+    data: {
+      userId,
+      testFileId: data.testFileId ?? null,
+      featureName: data.featureName,
+      testFileName: data.testFileName ?? null,
+      relativePath: data.relativePath ?? null,
+      status: "RUNNING",
+      gitHubRunId: normalizeGitHubRunId(data.gitHubRunId),
+      runner: data.runner ?? "local",
+    },
+  });
+  return mapTestRun(row);
+}
+
+export async function updateTestRun(
+  userId: string,
+  id: string,
+  data: {
+    status?: TestRunStatus;
+    durationMs?: number;
+    gitHubRunId?: number | string | null;
+    htmlUrl?: string | null;
+    runner?: string;
+    artifactMeta?: Record<string, unknown> | null;
+  }
+): Promise<DbTestRun | null> {
+  const existing = await prisma.testRun.findFirst({ where: { id, userId } });
+  if (!existing) return null;
+
+  try {
+    const row = await prisma.testRun.update({
+      where: { id },
+      data: {
+        status: data.status,
+        durationMs: data.durationMs,
+        gitHubRunId:
+          data.gitHubRunId !== undefined
+            ? normalizeGitHubRunId(data.gitHubRunId)
+            : undefined,
+        htmlUrl: data.htmlUrl,
+        runner: data.runner,
+        artifactMeta:
+          data.artifactMeta === null
+            ? Prisma.JsonNull
+            : (data.artifactMeta as Prisma.InputJsonValue | undefined),
+      },
+    });
+    return mapTestRun(row);
+  } catch (err) {
+    console.error("[test-run] update failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+export async function listTestRuns(userId: string, limit = 50): Promise<DbTestRun[]> {
+  const rows = await prisma.testRun.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return rows.map(mapTestRun);
+}
+
+export async function getTestRunDashboardStats(userId: string): Promise<{
+  totalRuns: number;
+  passRatePercent: number;
+  averageDurationMs: number;
+  recentRuns: DbTestRun[];
+}> {
+  const recentRuns = await listTestRuns(userId, 30);
+  const completed = recentRuns.filter((r) => r.status !== "RUNNING");
+  const passed = completed.filter((r) => r.status === "PASSED");
+  const passRatePercent =
+    completed.length > 0 ? Math.round((passed.length / completed.length) * 100) : 0;
+  const averageDurationMs =
+    completed.length > 0
+      ? Math.round(completed.reduce((sum, r) => sum + r.duration_ms, 0) / completed.length)
+      : 0;
+
+  const totalRuns = await prisma.testRun.count({ where: { userId } });
+
+  return {
+    totalRuns,
+    passRatePercent,
+    averageDurationMs,
+    recentRuns,
+  };
 }

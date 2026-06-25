@@ -4,8 +4,10 @@ export default defineConfig({
   testDir: "./tests/generated",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: process.env.CI ? 0 : 0,
   workers: 1,
+  timeout: process.env.CI ? 15000 : 30000,
+  globalTimeout: process.env.CI ? 120000 : undefined,
   reporter: [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
   use: {
     baseURL: process.env.BASE_URL ?? "http://localhost:3000",

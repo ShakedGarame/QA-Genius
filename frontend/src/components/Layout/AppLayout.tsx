@@ -5,6 +5,7 @@ import {
   FolderOpen,
   Activity,
   History,
+  LayoutDashboard,
   Settings,
   Menu,
   X,
@@ -17,10 +18,11 @@ import TestGeneratorTab from "../../pages/tabs/TestGeneratorTab";
 import TestRepositoryTab from "../../pages/tabs/TestRepositoryTab";
 import LogAnalyzerTab from "../../pages/tabs/LogAnalyzerTab";
 import HistoryTab from "../../pages/tabs/HistoryTab";
+import DashboardTab from "../../pages/tabs/DashboardTab";
 import SettingsTab from "../../pages/tabs/SettingsTab";
 import type { AuthUser } from "../../hooks/useAuth";
 
-export type TabId = "generator" | "repository" | "analyzer" | "history" | "settings";
+export type TabId = "generator" | "repository" | "analyzer" | "history" | "dashboard" | "settings";
 
 const NAV_ITEMS: {
   id: TabId;
@@ -34,6 +36,7 @@ const NAV_ITEMS: {
   { id: "repository", label: "Test Repository", description: "Run and manage saved tests", icon: FolderOpen, accent: "from-emerald-500 to-teal-500" },
   { id: "analyzer", label: "Log Analyzer", description: "AI root-cause from logs", icon: Activity, accent: "from-violet-500 to-purple-500" },
   { id: "history", label: "History", description: "Past tests and log analyses", icon: History, accent: "from-amber-500 to-orange-500" },
+  { id: "dashboard", label: "Dashboard", description: "Pass rate, speed, and run totals", icon: LayoutDashboard, accent: "from-cyan-500 to-blue-600" },
   { id: "settings", label: "Settings", description: "API keys, integrations, paths", icon: Settings, accent: "from-slate-500 to-slate-600", bottom: true },
 ];
 
@@ -345,6 +348,9 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           </div>
           <div className={activeTab === "history" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
             <HistoryTab />
+          </div>
+          <div className={activeTab === "dashboard" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+            <DashboardTab />
           </div>
           <div className={activeTab === "settings" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
             <SettingsTab />

@@ -22,8 +22,10 @@ import runRouter from "./routes/run.js";
 import analyzeRouter from "./routes/analyze.js";
 import testsRouter from "./routes/tests.js";
 import logAnalysesRouter from "./routes/logAnalyses.js";
+import testRunsRouter from "./routes/testRuns.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
+import { autoLocalGuest } from "./middleware/autoLocalGuest.js";
 
 const app = express();
 
@@ -34,15 +36,29 @@ if (isProduction) {
   app.set("trust proxy", 1);
 }
 
-// ─── Session store (PostgreSQL — works on Vercel) ─────────────────────────────
+// ─── Session store ────────────────────────────────────────────────────────────
+// Local dev: in-memory sessions (no Supabase dependency, survives db push).
+// Production: PostgreSQL via connect-pg-simple.
 
-const PgSession = connectPgSimple(session);
-// Sessions need session-mode pooler (5432); Prisma uses transaction pooler (6543) via DATABASE_URL.
-const sessionConnectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
-const pool = new pg.Pool({
-  connectionString: sessionConnectionString,
-  ssl: isProduction ? { rejectUnauthorized: false } : undefined,
-});
+function createSessionStore(): session.Store | undefined {
+  if (!isProduction) {
+    console.log("[session] Using in-memory store for local development");
+    return undefined; // express-session default MemoryStore
+  }
+
+  const PgSession = connectPgSimple(session);
+  const sessionConnectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+  const pool = new pg.Pool({
+    connectionString: sessionConnectionString,
+    ssl: { rejectUnauthorized: false },
+  });
+
+  return new PgSession({
+    pool,
+    createTableIfMissing: true,
+    tableName: "session",
+  });
+}
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
@@ -61,11 +77,7 @@ app.use(
     secret: process.env.SESSION_SECRET ?? "dev-secret-change-in-production",
     resave: false,
     saveUninitialized: false,
-    store: new PgSession({
-      pool,
-      createTableIfMissing: true,
-      tableName: "session",
-    }),
+    store: createSessionStore(),
     cookie: {
       httpOnly: true,
       secure: isProduction,
@@ -77,6 +89,7 @@ app.use(
 
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(autoLocalGuest);
 
 // ─── Auth routes (public) ─────────────────────────────────────────────────────
 app.use(authRouter);
@@ -116,6 +129,7 @@ app.use("/api", requireAuth, runRouter);
 app.use("/api", requireAuth, analyzeRouter);
 app.use("/api", requireAuth, testsRouter);
 app.use("/api", requireAuth, logAnalysesRouter);
+app.use("/api", requireAuth, testRunsRouter);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {

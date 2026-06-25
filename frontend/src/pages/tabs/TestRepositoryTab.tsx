@@ -9,8 +9,9 @@ import { useTestRepository } from "../../hooks/useTestRepository";
 import { useAuth } from "../../hooks/useAuth";
 import { FeatureGroup, RunTestResult, TestFileInfo } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
-import { buildRunTestHeaders, consumeRunTestStream, waitForCloudRunCompletion, enrichFailedCloudRun, requireGitHubTokenForCloudRun, routeFailureLogsToAnalyzer, getActionableFailureLogs } from "../../lib/cloudRunner";
+import { executeTestRun, requireGitHubTokenForCloudRun, shouldUseGitHubCloudRunner, routeFailureLogsToAnalyzer, getActionableFailureLogs } from "../../lib/cloudRunner";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
+import ArtifactsGallery from "../../components/qa-genius/ArtifactsGallery";
 
 function formatBytes(b: number) {
   return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
@@ -303,7 +304,7 @@ export default function TestRepositoryTab() {
     setLiveStatus("Initializing…");
 
     try {
-      const isCloudDeploy = /vercel\.app$/i.test(window.location.hostname);
+      const isCloudDeploy = shouldUseGitHubCloudRunner();
       const githubToken = requireGitHubTokenForCloudRun();
       const cloudCode = isMock ? MOCK_CODE_MAP[file.relativePath] : undefined;
 
@@ -323,42 +324,22 @@ export default function TestRepositoryTab() {
         return;
       }
 
-      const res = await fetch("/api/run-test", {
-        method: "POST",
-        headers: buildRunTestHeaders(),
-        credentials: "include",
-        body: JSON.stringify({
+      const finalResult = await executeTestRun(
+        {
           relativePath: file.relativePath,
           ...(cloudCode ? { code: cloudCode } : {}),
-        }),
-      });
-
-      let workflowRunId: number | undefined;
-      let streamResult: RunTestResult | undefined;
-
-      await consumeRunTestStream(res, {
-        onStatus: (msg, progress) => { setLiveStatus(msg); setLiveProgress(progress); },
-        onOutput: (chunk) => setLiveOutput((p) => p + chunk),
-        onResult: (data) => { streamResult = data; },
-        onWorkflowRunId: (id) => { workflowRunId = id; },
-      });
-
-      let finalResult: RunTestResult | undefined;
-
-      if (streamResult) {
-        finalResult =
-          streamResult.status === "failed"
-            ? await enrichFailedCloudRun(streamResult)
-            : streamResult;
-      } else if (workflowRunId) {
-        finalResult = await waitForCloudRunCompletion(workflowRunId, {
-          onProgress: (msg, pct) => { setLiveStatus(msg); setLiveProgress(pct); },
-          onOutput: (text) => setLiveOutput(text),
-        });
-      }
+        },
+        {
+          onStatus: (msg, pct) => { setLiveStatus(msg); setLiveProgress(pct); },
+          onOutputAppend: (chunk) => setLiveOutput((p) => p + chunk),
+          onOutputReplace: (text) => setLiveOutput(text),
+          onResult: (runResult) => {
+            setFileResults((p) => ({ ...p, [file.relativePath]: runResult }));
+          },
+        }
+      );
 
       if (finalResult) {
-        setFileResults((p) => ({ ...p, [file.relativePath]: finalResult! }));
         setLiveOutput(finalResult.output);
         setLiveProgress(100);
       }
@@ -512,50 +493,60 @@ export default function TestRepositoryTab() {
               </div>
             </div>
 
-            {/* Terminal output */}
-            <div className="flex-1 min-h-0 flex flex-col">
-              <div className="flex items-center justify-between px-5 py-2 border-b border-surface-700 bg-surface-800/40">
-                <div className="flex items-center gap-2">
-                  <Terminal className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="text-[11px] text-slate-400 font-mono">Playwright Output</span>
-                </div>
-                {isRunning && (
+            {/* Terminal output + failure artifacts */}
+            <div className="flex-1 min-h-0 flex">
+              <div className="flex-1 min-w-0 flex flex-col">
+                <div className="flex items-center justify-between px-5 py-2 border-b border-surface-700 bg-surface-800/40">
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-sky-400">{liveStatus}</span>
-                    <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin" />
+                    <Terminal className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="text-[11px] text-slate-400 font-mono">Playwright Output</span>
+                  </div>
+                  {isRunning && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-sky-400">{liveStatus}</span>
+                      <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin" />
+                    </div>
+                  )}
+                </div>
+
+                {isRunning && (
+                  <div className="h-0.5 bg-surface-700 flex-shrink-0">
+                    <div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${liveProgress}%` }} />
                   </div>
                 )}
+
+                <div ref={consoleRef} className="flex-1 overflow-auto p-4 font-mono text-xs leading-5">
+                  {liveOutput ? (
+                    liveOutput.split("\n").map((line, i) => (
+                      <div
+                        key={i}
+                        className={
+                          /✓|passed|PASS/i.test(line) ? "text-emerald-400"
+                          : /✗|failed|FAIL|error/i.test(line) ? "text-red-400"
+                          : /warn|⚠/i.test(line) ? "text-yellow-400"
+                          : /^\s+at\s/.test(line) ? "text-slate-600"
+                          : "text-slate-300"
+                        }
+                      >
+                        {line || "\u00A0"}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-600 text-sm gap-2">
+                      <Terminal className="w-8 h-8 opacity-20" />
+                      <p>Click <strong className="text-slate-400">Run Test</strong> to start execution</p>
+                    </div>
+                  )}
+                  {isRunning && <span className="inline-block w-2 h-3 bg-sky-400 animate-pulse mt-1" />}
+                </div>
               </div>
 
-              {isRunning && (
-                <div className="h-0.5 bg-surface-700 flex-shrink-0">
-                  <div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${liveProgress}%` }} />
-                </div>
-              )}
-
-              <div ref={consoleRef} className="flex-1 overflow-auto p-4 font-mono text-xs leading-5">
-                {liveOutput ? (
-                  liveOutput.split("\n").map((line, i) => (
-                    <div
-                      key={i}
-                      className={
-                        /✓|passed|PASS/i.test(line) ? "text-emerald-400"
-                        : /✗|failed|FAIL|error/i.test(line) ? "text-red-400"
-                        : /warn|⚠/i.test(line) ? "text-yellow-400"
-                        : /^\s+at\s/.test(line) ? "text-slate-600"
-                        : "text-slate-300"
-                      }
-                    >
-                      {line || "\u00A0"}
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-600 text-sm gap-2">
-                    <Terminal className="w-8 h-8 opacity-20" />
-                    <p>Click <strong className="text-slate-400">Run Test</strong> to start execution</p>
-                  </div>
-                )}
-                {isRunning && <span className="inline-block w-2 h-3 bg-sky-400 animate-pulse mt-1" />}
+              <div className="w-[280px] flex-shrink-0 hidden md:flex">
+                <ArtifactsGallery
+                  cloudRunId={selectedResult?.cloudRunId}
+                  htmlUrl={selectedResult?.htmlUrl}
+                  enabled={selectedResult?.status === "failed" && !isRunning && Boolean(selectedResult?.cloudRunId)}
+                />
               </div>
             </div>
 

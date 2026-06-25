@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 export interface AuthUser {
   id: string;
@@ -14,23 +14,49 @@ export interface AuthUser {
 type AuthState =
   | { status: "loading" }
   | { status: "authenticated"; user: AuthUser }
-  | { status: "unauthenticated" };
+  | { status: "unauthenticated" }
+  | { status: "backend_down" };
+
+const isLocalDev =
+  import.meta.env.DEV ||
+  (typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"));
 
 export function useAuth() {
   const [state, setState] = useState<AuthState>({ status: "loading" });
+  const retriesRef = useRef(0);
 
   const fetchMe = useCallback(async () => {
     try {
+      const health = await fetch("/health");
+      if (!health.ok) throw new Error("Backend unavailable");
+
       const res = await fetch("/api/me", { credentials: "include" });
       if (res.status === 401) {
+        if (isLocalDev) {
+          // Backend auto-guest should handle this — retry briefly
+          if (retriesRef.current < 6) {
+            retriesRef.current += 1;
+            setState({ status: "loading" });
+            window.setTimeout(() => { void fetchMe(); }, 1500);
+            return;
+          }
+        }
         setState({ status: "unauthenticated" });
         return;
       }
       if (!res.ok) throw new Error("Server error");
+      retriesRef.current = 0;
       const user: AuthUser = await res.json();
       setState({ status: "authenticated", user });
     } catch {
-      setState({ status: "unauthenticated" });
+      if (isLocalDev && retriesRef.current < 12) {
+        retriesRef.current += 1;
+        setState({ status: "loading" });
+        window.setTimeout(() => { void fetchMe(); }, 2000);
+        return;
+      }
+      setState(isLocalDev ? { status: "backend_down" } : { status: "unauthenticated" });
     }
   }, []);
 
@@ -50,6 +76,8 @@ export function useAuth() {
     user: state.status === "authenticated" ? state.user : null,
     isLoading: state.status === "loading",
     isAuthenticated: state.status === "authenticated",
+    isBackendDown: state.status === "backend_down",
+    isLocalDev,
     logout,
     refresh: fetchMe,
   };

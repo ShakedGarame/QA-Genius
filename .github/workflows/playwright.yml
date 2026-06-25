@@ -6,11 +6,12 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   playwright:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -22,11 +23,26 @@ jobs:
           node-version: "20"
           cache: npm
 
+      - name: Get Playwright version
+        id: pw-version
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-chromium-${{ steps.pw-version.outputs.version }}
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium (browser only)
+        run: npx playwright install chromium
+
+      - name: Install Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install-deps chromium
 
       - name: Materialize cloud test file
         env:
@@ -54,10 +70,22 @@ jobs:
           NODE
 
       - name: Run Playwright test
+        id: playwright
         env:
           BASE_URL: ${{ github.event.client_payload.base_url || 'https://example.com' }}
           CI: "true"
         run: |
           TEST_PATH="tests/generated/${{ github.event.client_payload.relative_path }}"
           echo "Running: npx playwright test ${TEST_PATH}"
-          npx playwright test "${TEST_PATH}" --config=playwright.config.ts --reporter=list
+          npx playwright test "${TEST_PATH}" --config=playwright.config.ts --reporter=list,html
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

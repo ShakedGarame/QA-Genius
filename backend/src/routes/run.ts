@@ -11,13 +11,25 @@ import {
   findDispatchRun,
   resolveCloudRunStatus,
   triggerPlaywrightWorkflow,
-  waitForWorkflowCompletion,
+  fetchRunArtifacts,
 } from "../services/githubActions.js";
+import {
+  createTestRun,
+  updateTestRun,
+  resolveGeneratedTestId,
+  getFeatureNameBySlug,
+} from "../db.js";
 
 const router = Router();
 
 const ROOT_DIR = path.resolve(process.cwd(), "..");
 const isVercel = process.env.VERCEL === "1";
+
+function shouldRunViaGitHubActions(req: Request): boolean {
+  if (isVercel) return true;
+  if (process.env.USE_GITHUB_ACTIONS_RUNNER === "1") return true;
+  return Boolean(extractGitHubTokenFromRequest(req));
+}
 
 interface RunTestRequest {
   code?: string;
@@ -59,12 +71,35 @@ async function resolveSpecCode(
   return { error: "Either 'code', 'fileName'+'featureSlug', or 'relativePath' is required" };
 }
 
+async function buildTestRunMeta(
+  userId: string,
+  body: RunTestRequest
+): Promise<{
+  featureName: string;
+  testFileName: string | null;
+  relativePath: string | null;
+  testFileId: string | null;
+}> {
+  const rel = body.relativePath ?? (body.featureSlug && body.fileName ? `${body.featureSlug}/${body.fileName}` : null);
+  const testFileId = rel ? await resolveGeneratedTestId(userId, rel) : null;
+  const parts = rel?.split("/") ?? [];
+  const slug = parts[0] ?? body.featureSlug ?? "cloud";
+  const testFileName = parts.length > 1 ? parts.slice(1).join("/") : body.fileName ?? null;
+
+  let featureName = slug;
+  const resolvedName = await getFeatureNameBySlug(userId, slug);
+  if (resolvedName) featureName = resolvedName;
+
+  return { featureName, testFileName, relativePath: rel, testFileId };
+}
+
 async function runViaGitHubActions(
   req: Request,
   res: Response,
   userId: string,
   body: RunTestRequest,
-  id: string
+  id: string,
+  dbRunId: string
 ): Promise<void> {
   const githubToken = extractGitHubTokenFromRequest(req);
   if (!githubToken) {
@@ -87,6 +122,7 @@ async function runViaGitHubActions(
   const testCodeB64 = Buffer.from(code, "utf8").toString("base64");
   const dispatchedAt = Date.now();
 
+  sendSSE(res, "started", { testRunId: dbRunId });
   sendSSE(res, "status", {
     message: "🤖 Triggering cloud runner on GitHub Actions…",
     progress: 10,
@@ -125,44 +161,89 @@ async function runViaGitHubActions(
 
   if (!workflowRunId) {
     sendSSE(res, "pending", {
-      message: "Workflow triggered but run ID not found yet. Poll cloud status shortly.",
+      message: "Workflow triggered but run ID not found yet. Client will keep polling…",
       runId: id,
+      testRunId: dbRunId,
+      dispatchedAt,
     });
     sendSSE(res, "done", { message: "Dispatch sent" });
     res.end();
     return;
   }
 
-  sendSSE(res, "dispatched", { workflowRunId, runId: id });
-  sendSSE(res, "output", { text: `🔗 GitHub run: #${workflowRunId}\n` });
-
-  const startedAt = Date.now();
-  const result = await waitForWorkflowCompletion(
-    githubToken,
-    workflowRunId,
-    startedAt,
-    (message, progress) => {
-      sendSSE(res, "status", { message, progress });
-      sendSSE(res, "output", { text: `${message}\n` });
-    }
-  );
-
-  sendSSE(res, "result", {
-    testId: id,
-    status: result.passed ? "passed" : "failed",
-    output: result.output,
-    rawLogs: result.rawLogs,
-    duration: result.durationMs,
-    exitCode: result.passed ? 0 : 1,
-    errorDetails: result.passed ? undefined : (result.errorDetails ?? result.rawLogs.slice(0, 800)),
-    cloudRunId: workflowRunId,
-    htmlUrl: result.htmlUrl,
+  void updateTestRun(userId, dbRunId, {
+    gitHubRunId: String(workflowRunId),
     runner: "github-actions",
-  });
+  }).catch((err) => console.error("[test-run] update failed:", err));
 
-  sendSSE(res, "done", { message: "Cloud execution complete" });
+  sendSSE(res, "dispatched", { workflowRunId, runId: id, testRunId: dbRunId, dispatchedAt });
+  sendSSE(res, "output", {
+    text:
+      `🔗 GitHub run #${workflowRunId}\n` +
+      `⏳ Polling every 4s from your browser until the run completes…\n`,
+  });
+  sendSSE(res, "status", {
+    message: "Cloud run dispatched — waiting for GitHub Actions…",
+    progress: 25,
+  });
+  sendSSE(res, "done", { message: "Dispatch complete — client will poll for results" });
   res.end();
 }
+
+router.get("/run-test/find-dispatch", async (req: Request, res: Response) => {
+  const githubToken = extractGitHubTokenFromRequest(req);
+  if (!githubToken) {
+    return res.status(401).json({ error: "GitHub token required in x-user-github-token header" });
+  }
+
+  const afterMs = Number(req.query.after ?? Date.now() - 120_000);
+  if (!Number.isFinite(afterMs)) {
+    return res.status(400).json({ error: "Invalid after timestamp" });
+  }
+
+  try {
+    const run = await findDispatchRun(githubToken, afterMs);
+    if (!run) {
+      return res.json({ success: true, found: false });
+    }
+    return res.json({
+      success: true,
+      found: true,
+      workflowRunId: run.id,
+      status: run.status,
+      conclusion: run.conclusion,
+      htmlUrl: run.htmlUrl,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to find dispatch run";
+    return res.status(500).json({ error: message });
+  }
+});
+
+router.get("/run-test/artifacts/:runId", async (req: Request, res: Response) => {
+  const githubToken = extractGitHubTokenFromRequest(req);
+  if (!githubToken) {
+    return res.status(401).json({ error: "GitHub token required in x-user-github-token header" });
+  }
+
+  const runId = Number(req.params.runId);
+  if (!Number.isFinite(runId) || runId <= 0) {
+    return res.status(400).json({ error: "Invalid run id" });
+  }
+
+  console.log(`[artifacts] Fetching artifacts for run ${runId}`);
+  try {
+    const gallery = await fetchRunArtifacts(githubToken, runId);
+    console.log(
+      `[artifacts] Run ${runId}: ${gallery.artifacts.length} artifact(s), ${gallery.screenshots.length} screenshot(s)`
+    );
+    return res.json({ success: true, runId, ...gallery });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch artifacts";
+    console.error(`[artifacts] Run ${runId} failed:`, message);
+    return res.status(500).json({ error: message });
+  }
+});
 
 router.get("/run-test/cloud-status/:runId", async (req: Request, res: Response) => {
   const githubToken = extractGitHubTokenFromRequest(req);
@@ -231,9 +312,18 @@ router.post("/run-test", async (req: Request, res: Response) => {
   res.setHeader("X-Accel-Buffering", "no");
 
   const id = body.testId ?? uuidv4();
+  const runMeta = await buildTestRunMeta(userId, body);
+  const dbRun = await createTestRun(userId, {
+    testFileId: runMeta.testFileId,
+    featureName: runMeta.featureName,
+    testFileName: runMeta.testFileName,
+    relativePath: runMeta.relativePath,
+    runner: shouldRunViaGitHubActions(req) ? "github-actions" : "local",
+  });
+  const dbRunId = dbRun.id;
 
-  if (isVercel) {
-    await runViaGitHubActions(req, res, userId, body, id);
+  if (shouldRunViaGitHubActions(req)) {
+    await runViaGitHubActions(req, res, userId, body, id, dbRunId);
     return;
   }
 
@@ -256,6 +346,7 @@ router.post("/run-test", async (req: Request, res: Response) => {
 
     const relPath = path.relative(ROOT_DIR, specPath);
 
+    sendSSE(res, "started", { testRunId: dbRunId });
     sendSSE(res, "status", {
       message: `🎭 Starting Playwright: ${path.basename(specPath)}`,
       progress: 10,
@@ -310,8 +401,15 @@ router.post("/run-test", async (req: Request, res: Response) => {
         ? extractErrorSummary(fullOutput + errorOutput)
         : undefined;
 
+      void updateTestRun(userId, dbRunId, {
+        status: passed ? "PASSED" : "FAILED",
+        durationMs: duration,
+        runner: "local",
+      }).catch((err) => console.error("[test-run] update failed:", err));
+
       sendSSE(res, "result", {
         testId: id,
+        testRunId: dbRunId,
         status: passed ? "passed" : "failed",
         output: fullOutput,
         duration,
@@ -329,7 +427,12 @@ router.post("/run-test", async (req: Request, res: Response) => {
         text: `⚠  Playwright not found (${err.message}). Running in mock mode...\n`,
       });
       const mockResult = buildMockResult(id, specCode, Date.now() - startTime);
-      sendSSE(res, "result", mockResult);
+      void updateTestRun(userId, dbRunId, {
+        status: mockResult.status === "passed" ? "PASSED" : "FAILED",
+        durationMs: mockResult.duration,
+        runner: "local-mock",
+      }).catch((e) => console.error("[test-run] update failed:", e));
+      sendSSE(res, "result", { ...mockResult, testRunId: dbRunId });
       sendSSE(res, "done", { message: "Mock execution complete" });
       res.end();
     });

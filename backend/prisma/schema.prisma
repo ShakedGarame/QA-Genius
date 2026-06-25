@@ -21,6 +21,7 @@ model User {
   settings    UserSettings?
   features    Feature[]
   logAnalyses LogAnalysis[]
+  testRuns    TestRun[]
 
   @@map("users")
 }
@@ -66,10 +67,34 @@ model GeneratedTest {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  feature Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  feature  Feature   @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  testRuns TestRun[]
 
   @@unique([featureId, fileName])
   @@map("generated_tests")
+}
+
+model TestRun {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  testFileId   String?  @map("test_file_id")
+  featureName  String   @map("feature_name")
+  testFileName String?  @map("test_file_name")
+  relativePath String?  @map("relative_path")
+  status       String   @default("RUNNING")
+  durationMs   Int      @default(0) @map("duration_ms")
+  gitHubRunId  String?  @map("github_run_id")
+  runner       String?  @default("local")
+  htmlUrl      String?  @map("html_url")
+  artifactMeta Json?    @map("artifact_meta")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  testFile GeneratedTest? @relation(fields: [testFileId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("test_runs")
 }
 
 model LogAnalysis {
