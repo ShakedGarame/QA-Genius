@@ -21,8 +21,26 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          # Caches ~/.npm so npm ci resolves packages from local cache
           cache: npm
 
+      # ── Cache node_modules directly ─────────────────────────────────────────
+      # This skips the unpack/link phase of `npm ci` on cache hit, saving ~60-90s.
+      - name: Cache node_modules
+        id: nm-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: nm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            nm-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.nm-cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+      # ── Cache Playwright browser binaries ───────────────────────────────────
+      # Chromium binaries are ~130 MB; downloading them on every run costs ~30s.
       - name: Get Playwright version
         id: pw-version
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
@@ -33,17 +51,20 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ms-playwright-${{ runner.os }}-chromium-${{ steps.pw-version.outputs.version }}
+          restore-keys: |
+            ms-playwright-${{ runner.os }}-chromium-
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright Chromium (browser only)
-        run: npx playwright install chromium
-
-      - name: Install Playwright OS dependencies
+      - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium --with-deps
+
+      # When the browser binary cache hit, we still need OS-level deps
+      # (libglib, libnss, etc.) but NOT the heavy browser download.
+      - name: Install Playwright OS dependencies only
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
 
+      # ── Materialize the test file from the dispatch payload ─────────────────
       - name: Materialize cloud test file
         env:
           RELATIVE_PATH: ${{ github.event.client_payload.relative_path }}
@@ -69,6 +90,10 @@ jobs:
           console.log(`Wrote cloud test: ${target} (${code.length} bytes)`);
           NODE
 
+      # ── Run only the dispatched test file ───────────────────────────────────
+      # --workers=1      : single Chromium process — no overhead of worker spawning
+      # --headed=false   : explicit headless mode (default in CI, but set for clarity)
+      # --reporter=list  : compact stdout reporter; html for the artifact
       - name: Run Playwright test
         id: playwright
         env:
@@ -77,8 +102,13 @@ jobs:
         run: |
           TEST_PATH="tests/generated/${{ github.event.client_payload.relative_path }}"
           echo "Running: npx playwright test ${TEST_PATH}"
-          npx playwright test "${TEST_PATH}" --config=playwright.config.ts --reporter=list,html
+          npx playwright test "${TEST_PATH}" \
+            --config=playwright.config.ts \
+            --reporter=list,html \
+            --workers=1 \
+            --headed=false
 
+      # ── Upload failure artifacts ─────────────────────────────────────────────
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

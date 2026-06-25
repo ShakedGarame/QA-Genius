@@ -205,6 +205,23 @@ for distributed systems. You have deep expertise in Playwright, CI/CD pipelines,
 React, and Coralogix/Datadog observability platforms.
 
 ═══════════════════════════════════════════════
+SIGNAL vs. NOISE — read this before analysing:
+  IGNORE completely (these are irrelevant CI infrastructure artefacts):
+    - Ubuntu / Linux / kernel version banners
+    - Node.js DeprecationWarning, ExperimentalWarning, url.parse() notices
+    - npm audit results, "packages looking for funding" messages
+    - Playwright browser download progress bars
+    - Azure / AWS / GitHub Actions runner metadata lines
+    - "Cache hit / miss / restored" lines from actions/cache
+    - Any line that is purely a blank separator or GHA group marker (##[group])
+
+  FOCUS exclusively on:
+    - Lines containing: Error:, FAILED, Timeout, expect(, toBeVisible, toHaveText,
+      toHaveURL, toContain, AssertionError, page.goto, net::ERR, locator., ✘, ✗, ×
+    - Playwright stack traces (lines starting with "at " inside a test failure block)
+    - The FIRST failure event — the root cause is always the earliest error, not a cascade.
+    - Any HTTP status codes (4xx / 5xx) in the log.
+
 DIAGNOSTIC METHODOLOGY:
   1. LOCATE the FIRST failure event in the timeline — this is the root cause, not a cascade symptom.
   2. CROSS-REFERENCE the Playwright stack trace with the Coralogix server logs provided.
@@ -637,9 +654,13 @@ export async function analyzeFailure(
     })
     .join("\n");
 
+  const trimmedError = trimLogsForAI(errorOutput);
+
   const userPrompt = `\
 You are performing a Root Cause Analysis on a Playwright test failure.
 Cross-reference the test code, the error output, and the Coralogix server logs below.
+Ignore all CI setup noise (Node warnings, Ubuntu banners, npm audit, cache lines) — focus
+only on Playwright assertion errors, stack traces, and HTTP error codes.
 
 ═══════════════════════════════════════════════
 ## Playwright Test Code (abbreviated)
@@ -647,9 +668,9 @@ Cross-reference the test code, the error output, and the Coralogix server logs b
 ${testCode.slice(0, 2000)}
 \`\`\`
 
-## Playwright Failure Output
+## Playwright Failure Output (pre-processed — noise filtered, failure lines + tail preserved)
 \`\`\`
-${errorOutput.slice(0, 1200)}
+${trimmedError}
 \`\`\`
 
 ## Coralogix Server Logs (fetched via MCP — ${logs.length} entries)
@@ -658,7 +679,8 @@ ${logLines || "(no server logs available)"}
 \`\`\`
 ═══════════════════════════════════════════════
 Produce the full 3-section RCA using the Markdown structure defined in your instructions.
-Map each finding to specific evidence from the logs and stack trace above.`;
+Map each finding to specific evidence from the logs and stack trace above.
+The FIRST Playwright assertion error or stack trace line is the root cause — start there.`;
 
   let raw: string;
   if (openaiKey) {
@@ -682,6 +704,74 @@ Map each finding to specific evidence from the logs and stack trace above.`;
   };
 }
 
+// ─── Log pre-processor ────────────────────────────────────────────────────────
+//
+// GitHub Actions logs are often 500-2000+ lines. The first ~70% is pure CI
+// infrastructure noise (Ubuntu version banners, Node.js deprecation warnings,
+// npm audit summaries, Azure region metadata, Playwright binary download
+// progress bars, etc.). The actual Playwright failure — the stack trace, the
+// failing assertion, the error message — always lives in the last portion of
+// the log. Sending the full raw text wastes tokens and buries the signal.
+//
+// Strategy:
+//   1. Strip setup-noise lines (matched by regex).
+//   2. Extract all lines that contain failure keywords anywhere in the log.
+//   3. Always include the last TAIL_LINES lines unconditionally (the Playwright
+//      failure summary is printed at the very end of a test run).
+//   4. De-duplicate, preserve original order, cap at MAX_LINES.
+
+const NOISE_PATTERNS = [
+  /^\s*$/,                                              // blank
+  /^(##\[group\]|##\[endgroup\]|##\[command\])/i,      // GHA group markers
+  /^(Current runner version|Runner name|Machine name)/i,
+  /^(Operating System|Virtual Environment|Installed Software)/i,
+  /ubuntu|linux|debian|kernel|cpu|memory|disk/i,
+  /^(AZURE_|AWS_|RUNNER_)/i,                           // env var dumps
+  /npm warn|npm notice|DeprecationWarning/i,
+  /ExperimentalWarning/i,
+  /url\.parse\(\)|punycode/i,
+  /^(added \d+ packages|audited \d+ packages|found \d+ vulnerab)/i,
+  /Downloading Playwright|downloading chromium|playwright browsers/i,
+  /Cache (hit|miss|restored|saved)/i,
+  /^(Run actions\/|uses: actions\/)/i,
+  /\d+ packages are looking for funding/i,
+];
+
+const FAILURE_PATTERNS =
+  /Error:|error:|FAILED|failed|Timeout|timeout|expect\(|toBeVisible|toHaveText|toHaveURL|toContain|AssertionError|at Object\.|at async |✘|✗|×|FAIL\b|page\.goto|Navigation to|net::ERR|locator\./i;
+
+const MAX_LINES = 300;
+const TAIL_LINES = 150;
+
+function trimLogsForAI(raw: string): string {
+  if (!raw || raw.length < 3000) return raw; // short enough — send as-is
+
+  const all = raw.split("\n");
+
+  // Always grab the tail unconditionally
+  const tail = all.slice(-TAIL_LINES);
+
+  // From the full log, collect lines that look like failures
+  const failureLines = all
+    .slice(0, all.length - TAIL_LINES)   // only search the part before the tail
+    .filter((l) => FAILURE_PATTERNS.test(l) && !NOISE_PATTERNS.some((p) => p.test(l)));
+
+  // Merge: failure lines first (context), then tail (summary)
+  const combined = [...failureLines.slice(-(MAX_LINES - TAIL_LINES)), ...tail];
+
+  // Strip noisy lines from the combined result
+  const cleaned = combined.filter((l) => !NOISE_PATTERNS.some((p) => p.test(l)));
+
+  const trimmed = cleaned.join("\n").trim();
+
+  // Annotate so the AI knows context was trimmed
+  const header =
+    `[LOG TRIMMED: ${all.length} total lines → ${cleaned.length} shown. ` +
+    `Failure-relevant lines + last ${TAIL_LINES} lines preserved.]\n\n`;
+
+  return header + trimmed;
+}
+
 // ─── Standalone log analysis (Tab 3) ─────────────────────────────────────────
 
 // ── Skill 4: Instant Log Analyzer (any raw log source → structured RCA JSON) ──
@@ -691,6 +781,23 @@ You diagnose failures from raw log output across Playwright, Coralogix, Node.js,
 Kubernetes, CI/CD runners, and application error traces.
 
 ═══════════════════════════════════════════════
+SIGNAL vs. NOISE — critical filtering rule:
+  ALWAYS IGNORE these CI infrastructure artefacts — they are NEVER the root cause:
+    - Node.js DeprecationWarning, ExperimentalWarning, url.parse() deprecation notices
+    - Ubuntu / Linux / kernel / CPU / memory / disk version banners
+    - npm warn, npm notice, npm audit, "packages looking for funding"
+    - Playwright browser download / installation progress
+    - GitHub Actions cache hit / miss lines
+    - Azure / AWS / RUNNER_ environment variable dumps
+    - Blank lines, GHA group markers (##[group], ##[endgroup])
+
+  The REAL signal is always in:
+    - Lines containing: Error:, FAILED, Timeout, expect(, AssertionError, net::ERR
+    - Playwright stack traces ("at Object.", "at async ")
+    - HTTP 4xx / 5xx status codes
+    - Application-level exceptions and their stack traces
+    - The LAST N lines of the log (Playwright always prints the failure summary at the end)
+
 DIAGNOSTIC METHODOLOGY:
   1. IDENTIFY the FIRST failure event — the root cause event, not downstream cascade symptoms.
   2. TRACE the propagation chain from root event to the observed symptom.
@@ -875,24 +982,30 @@ export async function analyzeRawLogs(
     return { ...MOCK_LOG_ANALYSES[key], isMock: true };
   }
 
+  const trimmedLogs = trimLogsForAI(rawLogs);
+
   const userPrompt = `\
 Perform a Root Cause Analysis on the following log output.
+IMPORTANT: Ignore all CI infrastructure noise — Ubuntu banners, Node.js DeprecationWarnings,
+npm audit lines, cache hit/miss lines, Azure metadata. Focus exclusively on Playwright
+assertion failures, stack traces, HTTP error codes, and application-level error messages.
 
 Log Source: ${source}
-Log Length: ${rawLogs.length} characters
+Log Length: ${rawLogs.length} characters (trimmed to ${trimmedLogs.length} chars for analysis)
 Timestamp of Analysis: ${new Date().toISOString()}
 
 ═══════════════════════════════════════════════
-## Raw Log / Error Output
+## Raw Log / Error Output (failure-relevant lines + tail preserved)
 \`\`\`
-${rawLogs.slice(0, 4000)}
+${trimmedLogs}
 \`\`\`
 ═══════════════════════════════════════════════
 Instructions:
-1. Identify the FIRST failure event in the log as the root cause.
-2. Trace the propagation chain to explain how it cascaded.
-3. Classify severity and category based on the evidence above.
-4. Return ONLY the JSON object defined in your system instructions — no extra text.`;
+1. The FIRST Playwright assertion error or stack trace is the root cause — find it first.
+2. Ignore any DeprecationWarning or url.parse() notices — these are not the cause of failure.
+3. Trace the propagation chain to explain how the failure cascaded.
+4. Classify severity and category based on the actual test/application error, not CI noise.
+5. Return ONLY the JSON object defined in your system instructions — no extra text.`;
 
   let raw: string;
   if (openaiKey) {
