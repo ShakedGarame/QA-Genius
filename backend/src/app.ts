@@ -49,9 +49,13 @@ function createSessionStore(): session.Store | undefined {
   }
 
   const PgSession = connectPgSimple(session);
-  const sessionConnectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+  // DATABASE_URL is the transaction pooler (high concurrency budget) — DIRECT_URL
+  // is the session pooler, reserved for migrations and capped at 15 clients.
+  // Session lookups happen on every request, so they must not compete for that cap.
+  const sessionConnectionString = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
   const pool = new pg.Pool({
     connectionString: sessionConnectionString,
+    max: 5,
     ssl: { rejectUnauthorized: false },
   });
 
