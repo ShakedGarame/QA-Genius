@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import passport from "../passportConfig.js";
 import { getOrCreateGuestUser, getUserSettings, upsertUserSettings } from "../db.js";
 import type { DbUser } from "../db.js";
+import { ensureDbUser } from "../middleware/ensureDbUser.js";
 
 const router = Router();
 
@@ -96,7 +97,7 @@ router.post("/auth/logout", (req: Request, res: Response, next: NextFunction) =>
 
 // ─── Current user (/api/me) ───────────────────────────────────────────────────
 
-router.get("/api/me", async (req: Request, res: Response) => {
+router.get("/api/me", ensureDbUser, async (req: Request, res: Response) => {
   const user = getUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
@@ -118,7 +119,7 @@ router.get("/api/me", async (req: Request, res: Response) => {
 
 // ─── User settings (/api/me/settings) ────────────────────────────────────────
 
-router.get("/api/me/settings", async (req: Request, res: Response) => {
+router.get("/api/me/settings", ensureDbUser, async (req: Request, res: Response) => {
   const user = getUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
@@ -132,6 +133,10 @@ router.get("/api/me/settings", async (req: Request, res: Response) => {
     coralogix_team_name: settings?.coralogix_team_name ?? null,
     coralogix_region: settings?.coralogix_region ?? "EU",
     tests_output_dir: settings?.tests_output_dir ?? null,
+    github_issues_repo: settings?.github_issues_repo ?? null,
+    jira_domain: settings?.jira_domain ?? null,
+    jira_email: settings?.jira_email ?? null,
+    jira_api_token: mask(settings?.jira_api_token ?? null),
     // Whether backend env provides AI without user needing to enter a key
     env_has_openai: !!process.env.OPENAI_API_KEY,
     env_has_anthropic: !!process.env.ANTHROPIC_API_KEY,
@@ -139,7 +144,7 @@ router.get("/api/me/settings", async (req: Request, res: Response) => {
   });
 });
 
-router.put("/api/me/settings", async (req: Request, res: Response) => {
+router.put("/api/me/settings", ensureDbUser, async (req: Request, res: Response) => {
   const user = getUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
@@ -150,6 +155,10 @@ router.put("/api/me/settings", async (req: Request, res: Response) => {
     coralogix_team_name,
     coralogix_region,
     tests_output_dir,
+    github_issues_repo,
+    jira_domain,
+    jira_email,
+    jira_api_token,
   } = req.body as Record<string, string | undefined>;
 
   // Only update keys explicitly sent by the client — omitting a field must not wipe stored secrets.
@@ -160,6 +169,12 @@ router.put("/api/me/settings", async (req: Request, res: Response) => {
     ...(coralogix_team_name !== undefined ? { coralogixTeamName: coralogix_team_name?.trim() || null } : {}),
     ...(coralogix_region !== undefined ? { coralogixRegion: coralogix_region?.trim() || null } : {}),
     ...(tests_output_dir !== undefined ? { testsOutputDir: tests_output_dir?.trim() || null } : {}),
+    ...(github_issues_repo !== undefined ? { githubIssuesRepo: github_issues_repo?.trim() || null } : {}),
+    ...(jira_domain !== undefined ? { jiraDomain: jira_domain?.trim() || null } : {}),
+    ...(jira_email !== undefined ? { jiraEmail: jira_email?.trim() || null } : {}),
+    ...(jira_api_token !== undefined && !jira_api_token.includes("•")
+      ? { jiraApiToken: jira_api_token?.trim() || null }
+      : {}),
   });
 
   res.json({ success: true });

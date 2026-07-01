@@ -25,6 +25,10 @@ export interface DbUserSettings {
   coralogix_team_name: string | null;
   coralogix_region: string | null;
   tests_output_dir: string | null;
+  github_issues_repo: string | null;
+  jira_domain: string | null;
+  jira_email: string | null;
+  jira_api_token: string | null;
   updated_at: string;
 }
 
@@ -72,6 +76,10 @@ function mapSettings(row: {
   coralogixTeamName: string | null;
   coralogixRegion: string | null;
   testsOutputDir: string | null;
+  githubIssuesRepo: string | null;
+  jiraDomain: string | null;
+  jiraEmail: string | null;
+  jiraApiToken: string | null;
   updatedAt: Date;
 }): DbUserSettings {
   return {
@@ -82,6 +90,10 @@ function mapSettings(row: {
     coralogix_team_name: row.coralogixTeamName,
     coralogix_region: row.coralogixRegion,
     tests_output_dir: row.testsOutputDir,
+    github_issues_repo: row.githubIssuesRepo,
+    jira_domain: row.jiraDomain,
+    jira_email: row.jiraEmail,
+    jira_api_token: row.jiraApiToken,
     updated_at: row.updatedAt.toISOString(),
   };
 }
@@ -131,10 +143,17 @@ export async function getOrCreateGuestUser(): Promise<DbUser> {
  * Fixes stale "local-dev-guest" sessions created while the DB was offline.
  */
 export async function resolveDbUser(sessionUser: DbUser): Promise<DbUser> {
+  // The offline guest has no fixed row — reconcile it to (or create) the real
+  // Supabase guest user. getOrCreateGuestUser() already falls back to the
+  // in-memory guest if Supabase is genuinely unreachable.
+  if (sessionUser.id === buildLocalDevGuest().id) {
+    return getOrCreateGuestUser();
+  }
+
   const existing = await findUserById(sessionUser.id);
   if (existing) return existing;
 
-  if (sessionUser.github_id === "mock_user_123" || sessionUser.id === buildLocalDevGuest().id) {
+  if (sessionUser.github_id === "mock_user_123") {
     return getOrCreateGuestUser();
   }
 
@@ -224,8 +243,13 @@ export async function upsertGoogleUser(profile: {
 }
 
 export async function getUserSettings(userId: string): Promise<DbUserSettings | null> {
-  const row = await prisma.userSettings.findUnique({ where: { userId } });
-  return row ? mapSettings(row) : null;
+  if (userId === buildLocalDevGuest().id) return null;
+  try {
+    const row = await prisma.userSettings.findUnique({ where: { userId } });
+    return row ? mapSettings(row) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function upsertUserSettings(
@@ -237,9 +261,16 @@ export async function upsertUserSettings(
     coralogixTeamName?: string | null;
     coralogixRegion?: string | null;
     testsOutputDir?: string | null;
+    githubIssuesRepo?: string | null;
+    jiraDomain?: string | null;
+    jiraEmail?: string | null;
+    jiraApiToken?: string | null;
   }
 ): Promise<void> {
   const existing = await prisma.userSettings.findUnique({ where: { userId } });
+
+  const pick = <T>(next: T | undefined, fallback: T | null | undefined): T | null | undefined =>
+    next !== undefined ? next : fallback;
 
   await prisma.userSettings.upsert({
     where: { userId },
@@ -251,17 +282,22 @@ export async function upsertUserSettings(
       coralogixTeamName: keys.coralogixTeamName ?? null,
       coralogixRegion: keys.coralogixRegion ?? "EU",
       testsOutputDir: keys.testsOutputDir ?? null,
+      githubIssuesRepo: keys.githubIssuesRepo ?? null,
+      jiraDomain: keys.jiraDomain ?? null,
+      jiraEmail: keys.jiraEmail ?? null,
+      jiraApiToken: keys.jiraApiToken ?? null,
     },
     update: {
-      openaiApiKey: keys.openai !== undefined ? keys.openai : existing?.openaiApiKey,
-      anthropicApiKey: keys.anthropic !== undefined ? keys.anthropic : existing?.anthropicApiKey,
-      coralogixApiKey: keys.coralogix !== undefined ? keys.coralogix : existing?.coralogixApiKey,
-      coralogixTeamName:
-        keys.coralogixTeamName !== undefined ? keys.coralogixTeamName : existing?.coralogixTeamName,
-      coralogixRegion:
-        keys.coralogixRegion !== undefined ? keys.coralogixRegion : existing?.coralogixRegion,
-      testsOutputDir:
-        keys.testsOutputDir !== undefined ? keys.testsOutputDir : existing?.testsOutputDir,
+      openaiApiKey: pick(keys.openai, existing?.openaiApiKey),
+      anthropicApiKey: pick(keys.anthropic, existing?.anthropicApiKey),
+      coralogixApiKey: pick(keys.coralogix, existing?.coralogixApiKey),
+      coralogixTeamName: pick(keys.coralogixTeamName, existing?.coralogixTeamName),
+      coralogixRegion: pick(keys.coralogixRegion, existing?.coralogixRegion),
+      testsOutputDir: pick(keys.testsOutputDir, existing?.testsOutputDir),
+      githubIssuesRepo: pick(keys.githubIssuesRepo, existing?.githubIssuesRepo),
+      jiraDomain: pick(keys.jiraDomain, existing?.jiraDomain),
+      jiraEmail: pick(keys.jiraEmail, existing?.jiraEmail),
+      jiraApiToken: pick(keys.jiraApiToken, existing?.jiraApiToken),
     },
   });
 }
@@ -401,6 +437,24 @@ export async function getGeneratedTestCode(
     include: { tests: { where: { fileName } } },
   });
   return feature?.tests[0]?.code ?? null;
+}
+
+export async function updateGeneratedTestCode(
+  userId: string,
+  featureSlug: string,
+  fileName: string,
+  newCode: string
+): Promise<boolean> {
+  const feature = await prisma.feature.findUnique({
+    where: { userId_slug: { userId, slug: featureSlug } },
+  });
+  if (!feature) return false;
+
+  const result = await prisma.generatedTest.updateMany({
+    where: { featureId: feature.id, fileName },
+    data: { code: newCode },
+  });
+  return result.count > 0;
 }
 
 export async function deleteGeneratedTest(

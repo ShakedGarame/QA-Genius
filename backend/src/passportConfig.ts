@@ -11,31 +11,15 @@ passport.serializeUser((user, done) => {
 });
 
 passport.deserializeUser(async (id: string, done) => {
+  // Fast path: offline guest never exists in DB — skip the round-trip entirely.
+  if (!isProduction && id === buildLocalDevGuest().id) {
+    return done(null, buildLocalDevGuest());
+  }
+
   try {
     const user = await findUserById(id);
-    if (user) return done(null, user);
-
-    if (!isProduction && id === buildLocalDevGuest().id) {
-      try {
-        const guest = await getOrCreateGuestUser();
-        if (guest.id !== buildLocalDevGuest().id) return done(null, guest);
-      } catch {
-        // DB still offline — fall back to in-memory guest (read-only flows)
-      }
-      return done(null, buildLocalDevGuest());
-    }
-
-    done(null, false);
+    done(null, user ?? false);
   } catch (err) {
-    if (!isProduction && id === buildLocalDevGuest().id) {
-      try {
-        const guest = await getOrCreateGuestUser();
-        if (guest.id !== buildLocalDevGuest().id) return done(null, guest);
-      } catch {
-        // ignore
-      }
-      return done(null, buildLocalDevGuest());
-    }
     done(err);
   }
 });

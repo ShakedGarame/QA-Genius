@@ -772,6 +772,149 @@ function trimLogsForAI(raw: string): string {
   return header + trimmed;
 }
 
+// ─── Skill 5: Self-Healing Test Repair ───────────────────────────────────────
+const SELF_HEAL_SYSTEM = `\
+You are a Playwright Test Surgeon with deep expertise in locator strategies, assertion \
+patterns, and test resilience. Your ONLY job is to fix a broken Playwright TypeScript test \
+based on a provided error output. You make the MINIMUM change necessary to resolve the \
+failure — nothing more.
+
+═══════════════════════════════════════════════
+CRITICAL — BUSINESS LOGIC PROTECTION (read before every repair):
+  These rules exist to prevent masking real application bugs by silently altering test expectations.
+
+  PERMITTED SCOPE — the ONLY things you may change:
+    ✓ Broken, outdated, or brittle DOM selectors / locators
+        Replace class names, dynamic IDs, or XPath with semantic locators:
+        page.getByRole() → page.getByLabel() → page.getByText() → page.getByTestId()
+    ✓ Navigation path changes — fix goto() URLs only if the URL itself changed in the app
+    ✓ Timeout exhaustion from slow renders — add { timeout: 10000 } to the failing assertion
+    ✓ Hard waits — replace waitForTimeout() with web-first assertions
+    ✓ Import path or fixture configuration breakage in test setup code
+    ✓ Upgrade brittle CSS/XPath selectors to semantic Playwright locators
+
+  STRICTLY FORBIDDEN — never change these (doing so masks real application bugs):
+    ✗ The expected string in: toHaveText(), toContainText(), toHaveTitle(), toHaveValue()
+    ✗ The expected URL in: toHaveURL()
+    ✗ The expected count in: toHaveCount()
+    ✗ The expected attribute value in: toHaveAttribute()
+    ✗ Any functional assertion that validates business logic, data content, or UI copy
+    ✗ test.describe() / test() names, tags, or structure
+    ✗ Adding or removing test cases
+
+  TEXT ASSERTION MISMATCH PROTOCOL:
+    If the failure message is "expected 'X' to equal/contain/be 'Y'" (a text or string
+    content mismatch), this means the application's text changed — which is a POTENTIAL
+    APPLICATION BUG, not a test maintenance issue.
+
+    YOU MUST respond by:
+    1. Leaving the expected string in the assertion COMPLETELY UNCHANGED.
+    2. Inserting this exact warning comment on the line immediately above the failing assertion:
+       // ⚠️ SELF-HEAL SKIPPED: text mismatch may be an application bug — verify with the dev team before changing this expectation
+    3. Fixing ONLY the surrounding technical issues (locator strategy, timeout wrapper) if any exist.
+    4. If the ONLY required change is the expected string value — return the file with ONLY
+       the warning comment added and nothing else changed.
+
+═══════════════════════════════════════════════
+GENERAL RULES:
+  1. Return ONLY the complete fixed TypeScript file — no markdown fences, no commentary.
+  2. Fix ONLY the lines that caused the failure. Do not restructure, rename, or reorder tests.
+  3. Preserve every passing test case exactly as written.
+  4. For locator / timeout failures, update the locator using this priority:
+       page.getByRole() → page.getByLabel() → page.getByText() → page.getByTestId()
+  5. For navigation errors, fix the goto() path or add waitForLoadState('networkidle').
+  6. For timeout exhaustion, add { timeout: 10000 } to the failing assertion — never add waitForTimeout().
+  7. NEVER add page.waitForTimeout() — use web-first assertions only.
+
+FORBIDDEN output prefixes:
+  ✗ \`\`\`typescript or \`\`\`ts fences
+  ✗ "Here is the fixed code:" or any introductory sentence
+  ✗ "// Changed:" or "// Fixed:" inline comments explaining what was altered
+═══════════════════════════════════════════════`;
+
+function buildMockHealedCode(testCode: string, errorOutput: string): string {
+  let healed = testCode;
+
+  // Replace exact text matchers with partial (most common resilience fix)
+  healed = healed.replace(/\.toHaveText\(/g, ".toContainText(");
+
+  // Replace hard waits
+  healed = healed.replace(
+    /await\s+page\.waitForTimeout\(\d+\)/g,
+    "await page.waitForLoadState('networkidle')"
+  );
+
+  // Add timeout to first toBeVisible if error is a timeout
+  if (/timeout|timed out/i.test(errorOutput)) {
+    healed = healed.replace(/\.toBeVisible\(\)/, ".toBeVisible({ timeout: 10000 })");
+  }
+
+  return healed;
+}
+
+export interface SelfHealResult {
+  healedCode: string;
+  model: string;
+  isMock: boolean;
+}
+
+export async function selfHealTest(
+  testCode: string,
+  errorOutput: string,
+  options: { openaiKey?: string; rootCause?: string; suggestedFix?: string } = {}
+): Promise<SelfHealResult> {
+  const { openaiKey, isMock } = resolveKeys(options);
+
+  if (isMock) {
+    await new Promise((r) => setTimeout(r, 1500));
+    return {
+      healedCode: buildMockHealedCode(testCode, errorOutput),
+      model: "mock",
+      isMock: true,
+    };
+  }
+
+  const contextBlock = [
+    options.rootCause && `## Root Cause Summary\n${options.rootCause}`,
+    options.suggestedFix && `## Suggested Fix from RCA\n${options.suggestedFix}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const userPrompt = `\
+Fix the following failing Playwright TypeScript test. Apply only the minimum change to \
+resolve the error. Return the complete fixed file with no extra text.
+
+═══════════════════════════════════════════════
+## Playwright Error Output
+\`\`\`
+${errorOutput.slice(0, 2000)}
+\`\`\`
+${contextBlock ? `\n${contextBlock}\n` : ""}
+## Failing Test File (fix this)
+\`\`\`typescript
+${testCode.slice(0, 4000)}
+\`\`\`
+═══════════════════════════════════════════════
+Return ONLY the raw TypeScript — no fences, no explanation.`;
+
+  let healedCode: string;
+  let model: string;
+
+  if (openaiKey) {
+    healedCode = await callOpenAI(SELF_HEAL_SYSTEM, userPrompt, openaiKey);
+    model = OPENAI_MODEL;
+  } else {
+    healedCode = await callAnthropic(SELF_HEAL_SYSTEM, userPrompt);
+    model = ANTHROPIC_MODEL;
+  }
+
+  healedCode = healedCode.replace(/^```(?:typescript|ts)?\n?/, "").replace(/\n?```$/, "").trim();
+  healedCode = stripMockModeArtifacts(healedCode);
+
+  return { healedCode, model, isMock: false };
+}
+
 // ─── Standalone log analysis (Tab 3) ─────────────────────────────────────────
 
 // ── Skill 4: Instant Log Analyzer (any raw log source → structured RCA JSON) ──

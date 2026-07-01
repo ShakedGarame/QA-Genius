@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BrainCircuit,
-  Loader2,
-  AlertTriangle,
-  Info,
-  Wrench,
-  Zap,
+  Bug,
+  CheckCircle2,
   ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  FileCode2,
+  Github,
+  Info,
+  Loader2,
   RotateCcw,
   ShieldAlert,
+  Sparkles,
+  Wrench,
+  Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import { RawLogAnalysisResponse } from "../../types";
 import { buildOpenAIKeyHeaders } from "../../lib/apiKeys";
+import { buildGitHubTokenHeaders } from "../../lib/githubToken";
 import { readPendingAnalyzerPayload } from "../../lib/cloudRunner";
+import type { AnalyzerRoutePayload } from "../../lib/cloudRunner";
 import {
   SidebarPanel,
   PanelHeader,
@@ -23,6 +31,7 @@ import {
   FormTextarea,
   ErrorBanner,
 } from "../../components/ui/layout";
+import SelfHealModal from "../../components/qa-genius/SelfHealModal";
 
 const LOG_SOURCES = [
   { value: "playwright", label: "Playwright Test Failure", icon: "🎭", placeholder: `Error: Timed out 5000ms waiting for expect(locator).toBeVisible()
@@ -69,15 +78,52 @@ const SEVERITY_CONFIG: Record<string, { label: string; color: string; bg: string
   unknown: { label: "UNKNOWN", color: "text-slate-400", bg: "bg-slate-500/15 border-slate-500/30" },
 };
 
+const HEAL_ELIGIBLE_SOURCES: LogSource[] = ["playwright"];
+const HEAL_ELIGIBLE_CATEGORIES = ["test-failure"];
+
 export default function LogAnalyzerTab() {
   const [source, setSource] = useState<LogSource>("playwright");
   const [rawLogs, setRawLogs] = useState("");
+  const [testCode, setTestCode] = useState("");
+  const [featureSlug, setFeatureSlug] = useState<string | undefined>();
+  const [fileName, setFileName] = useState<string | undefined>();
+  const [showTestCodeField, setShowTestCodeField] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [result, setResult] = useState<RawLogAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selfHealOpen, setSelfHealOpen] = useState(false);
+  const testCodeRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Ticket dispatch ──────────────────────────────────────────────────────────
+  const [githubStatus, setGithubStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [githubTicketUrl, setGithubTicketUrl] = useState<string | null>(null);
+  const [githubErrorMsg, setGithubErrorMsg] = useState<string | null>(null);
+  const [jiraStatus, setJiraStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [jiraTicketUrl, setJiraTicketUrl] = useState<string | null>(null);
+  const [jiraErrorMsg, setJiraErrorMsg] = useState<string | null>(null);
+  const [jiraProjectKey, setJiraProjectKey] = useState(
+    () => localStorage.getItem("qa-genius:jira-project-key") ?? ""
+  );
 
   const activeSource = LOG_SOURCES.find((s) => s.value === source)!;
+  const isPlaywright = HEAL_ELIGIBLE_SOURCES.includes(source);
+
+  const handleSelfHealClick = useCallback(() => {
+    if (testCode.trim()) {
+      setSelfHealOpen(true);
+    } else {
+      setShowTestCodeField(true);
+      // Scroll + focus the textarea after it renders
+      setTimeout(() => {
+        testCodeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        testCodeRef.current?.focus();
+      }, 80);
+    }
+  }, [testCode]);
+  const isHealEligible =
+    result !== null &&
+    (isPlaywright || HEAL_ELIGIBLE_CATEGORIES.includes(result.category ?? ""));
 
   const handleAnalyze = useCallback(async (logsOverride?: string, sourceOverride?: LogSource) => {
     const logsToAnalyze = logsOverride ?? rawLogs;
@@ -116,17 +162,17 @@ export default function LogAnalyzerTab() {
           if (!eventType || !dataLine) continue;
 
           try {
-            const data = JSON.parse(dataLine);
+            const data = JSON.parse(dataLine) as Record<string, unknown>;
             if (eventType === "status") {
-              setStatusMessage(data.message ?? "");
+              setStatusMessage(String(data.message ?? ""));
             } else if (eventType === "result") {
-              setResult(data as RawLogAnalysisResponse);
+              setResult(data as unknown as RawLogAnalysisResponse);
               window.dispatchEvent(new CustomEvent("qa-genius:repository-changed"));
             } else if (eventType === "error") {
-              setError(data.message ?? "Analysis failed");
+              setError(String(data.message ?? "Analysis failed"));
             }
           } catch {
-            // ignore
+            // ignore malformed chunks
           }
         }
       }
@@ -139,17 +185,24 @@ export default function LogAnalyzerTab() {
   }, [rawLogs, source]);
 
   const applyPopulate = useCallback(
-    (detail: { logs: string; source?: LogSource; autoTrigger?: boolean }) => {
+    (detail: AnalyzerRoutePayload) => {
       if (!detail.logs?.trim()) return;
-      const incomingSource = detail.source ?? "playwright";
+      const incomingSource = (detail.source as LogSource) ?? "playwright";
       setRawLogs(detail.logs);
       setSource(incomingSource);
       setResult(null);
       setError(null);
+
+      // Carry self-heal context if provided
+      if (detail.testCode) {
+        setTestCode(detail.testCode);
+        setShowTestCodeField(true);
+      }
+      if (detail.featureSlug) setFeatureSlug(detail.featureSlug);
+      if (detail.fileName) setFileName(detail.fileName);
+
       if (detail.autoTrigger) {
-        setTimeout(() => {
-          handleAnalyze(detail.logs, incomingSource);
-        }, 100);
+        setTimeout(() => handleAnalyze(detail.logs, incomingSource), 100);
       }
     },
     [handleAnalyze]
@@ -157,14 +210,12 @@ export default function LogAnalyzerTab() {
 
   useEffect(() => {
     const pending = readPendingAnalyzerPayload();
-    if (pending?.logs) {
-      applyPopulate({ logs: pending.logs, source: pending.source as LogSource, autoTrigger: pending.autoTrigger });
-    }
+    if (pending?.logs) applyPopulate(pending);
   }, [applyPopulate]);
 
   useEffect(() => {
     const onPopulate = (event: Event) => {
-      const detail = (event as CustomEvent<{ logs: string; source?: LogSource; autoTrigger?: boolean }>).detail;
+      const detail = (event as CustomEvent<AnalyzerRoutePayload>).detail;
       if (!detail?.logs) return;
       applyPopulate(detail);
     };
@@ -174,8 +225,89 @@ export default function LogAnalyzerTab() {
 
   const handleClear = () => {
     setRawLogs("");
+    setTestCode("");
+    setFeatureSlug(undefined);
+    setFileName(undefined);
     setResult(null);
     setError(null);
+    setGithubStatus("idle");
+    setGithubTicketUrl(null);
+    setGithubErrorMsg(null);
+    setJiraStatus("idle");
+    setJiraTicketUrl(null);
+    setJiraErrorMsg(null);
+  };
+
+  const handleFileGitHubIssue = async () => {
+    if (!result) return;
+    setGithubStatus("loading");
+    setGithubErrorMsg(null);
+
+    const issueBody = [
+      `## Root Cause\n${result.rootCause}`,
+      `## Technical Breakdown\n${result.explanation}`,
+      `## Suggested Fix\n${result.suggestedFix}`,
+      `\n---\n*Filed automatically by [QA Genius](https://qa-genius-app.vercel.app)*`,
+    ].join("\n\n");
+
+    try {
+      const res = await fetch("/api/issues/github/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...buildGitHubTokenHeaders(),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          title: `🐛 QA Failure: ${result.rootCause.slice(0, 100)}`,
+          body: issueBody,
+          labels: ["bug", "qa-genius"],
+        }),
+      });
+      const data = await res.json() as { issueUrl?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to create issue");
+      setGithubStatus("success");
+      setGithubTicketUrl(data.issueUrl ?? null);
+    } catch (err) {
+      setGithubStatus("error");
+      setGithubErrorMsg(err instanceof Error ? err.message : "Failed to create GitHub issue");
+    }
+  };
+
+  const handleFileJiraTicket = async () => {
+    if (!result) return;
+    if (!jiraProjectKey.trim()) {
+      setJiraErrorMsg("Project Key is required (e.g. QA, BUG)");
+      return;
+    }
+    setJiraStatus("loading");
+    setJiraErrorMsg(null);
+
+    const description = [
+      `Root Cause:\n${result.rootCause}`,
+      `Technical Breakdown:\n${result.explanation}`,
+      `Suggested Fix:\n${result.suggestedFix}`,
+    ].join("\n\n");
+
+    try {
+      const res = await fetch("/api/issues/jira/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title: `QA Failure: ${result.rootCause.slice(0, 200)}`,
+          description,
+          projectKey: jiraProjectKey.trim().toUpperCase(),
+        }),
+      });
+      const data = await res.json() as { issueUrl?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to create Jira ticket");
+      setJiraStatus("success");
+      setJiraTicketUrl(data.issueUrl ?? null);
+    } catch (err) {
+      setJiraStatus("error");
+      setJiraErrorMsg(err instanceof Error ? err.message : "Failed to create Jira ticket");
+    }
   };
 
   return (
@@ -220,17 +352,49 @@ export default function LogAnalyzerTab() {
               value={rawLogs}
               onChange={(e) => setRawLogs(e.target.value)}
               placeholder={activeSource.placeholder}
-              className="flex-1 min-h-[240px]"
+              className="flex-1 min-h-[180px]"
             />
             <p className="text-[10px] text-slate-600 mt-1 text-right">
               {rawLogs.length.toLocaleString()} characters
             </p>
           </div>
 
+          {/* Playwright Test Code (collapsible, self-heal context) */}
+          {isPlaywright && (
+            <div>
+              <button
+                onClick={() => setShowTestCodeField((v) => !v)}
+                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors mb-1.5 group"
+              >
+                {showTestCodeField
+                  ? <ChevronDown className="w-3.5 h-3.5" />
+                  : <ChevronRight className="w-3.5 h-3.5" />}
+                <FileCode2 className="w-3.5 h-3.5" />
+                <span className="font-medium">
+                  Test Code{" "}
+                  <span className="text-slate-600 font-normal">(optional — enables Self-Heal)</span>
+                </span>
+                {testCode && (
+                  <span className="ml-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                )}
+              </button>
+
+              {showTestCodeField && (
+                <FormTextarea
+                  ref={testCodeRef}
+                  value={testCode}
+                  onChange={(e) => setTestCode(e.target.value)}
+                  placeholder={"// Paste the failing .spec.ts file here\nimport { test, expect } from '@playwright/test';\n\ntest('login', async ({ page }) => {\n  await page.goto('/');\n  // ...\n});"}
+                  className="min-h-[140px] font-mono text-[11px]"
+                />
+              )}
+            </div>
+          )}
+
           {/* Action buttons */}
           <div className="flex gap-2">
             <button
-              onClick={() => handleAnalyze()}
+              onClick={() => void handleAnalyze()}
               disabled={!rawLogs.trim() || isAnalyzing}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium shadow-lg transition-all"
             >
@@ -278,7 +442,7 @@ export default function LogAnalyzerTab() {
 
         {result && !isAnalyzing && (
           <div className="p-6 space-y-5 animate-fade-in">
-            {/* Header with severity + mock badge */}
+            {/* Header row: icon + title + badges */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
@@ -286,7 +450,9 @@ export default function LogAnalyzerTab() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-slate-200">AI Analysis Complete</p>
-                  <p className="text-xs text-slate-500">{activeSource.icon} {activeSource.label}</p>
+                  <p className="text-xs text-slate-500">
+                    {activeSource.icon} {activeSource.label}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -315,14 +481,18 @@ export default function LogAnalyzerTab() {
                 <ShieldAlert className="w-4 h-4 text-orange-400" />
                 <p className="text-xs font-bold text-orange-300 uppercase tracking-wider">Root Cause</p>
               </div>
-              <p className="text-sm font-semibold text-slate-100 leading-relaxed">{result.rootCause}</p>
+              <p className="text-sm font-semibold text-slate-100 leading-relaxed">
+                {result.rootCause}
+              </p>
             </div>
 
-            {/* Explanation */}
+            {/* Technical explanation */}
             <div className="rounded-xl bg-surface-800/50 border border-surface-600 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <Info className="w-4 h-4 text-sky-400" />
-                <p className="text-xs font-bold text-sky-300 uppercase tracking-wider">Technical Explanation</p>
+                <p className="text-xs font-bold text-sky-300 uppercase tracking-wider">
+                  Technical Explanation
+                </p>
               </div>
               <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
                 {result.explanation}
@@ -331,13 +501,133 @@ export default function LogAnalyzerTab() {
 
             {/* Suggested fix */}
             <div className="rounded-xl bg-surface-800 border border-emerald-500/20 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Wrench className="w-4 h-4 text-emerald-400" />
-                <p className="text-xs font-bold text-emerald-300 uppercase tracking-wider">Suggested Fix</p>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Wrench className="w-4 h-4 text-emerald-400" />
+                  <p className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
+                    Suggested Fix
+                  </p>
+                </div>
               </div>
               <pre className="text-sm text-emerald-200 whitespace-pre-wrap font-mono leading-relaxed">
                 {result.suggestedFix}
               </pre>
+            </div>
+
+            {/* Self-Heal CTA — shown for Playwright / test-failure results */}
+            {isHealEligible && (
+              <div className="rounded-xl border bg-surface-800 border-sky-500/25 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-sky-500/20 border border-sky-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Sparkles className="w-4 h-4 text-sky-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-200">Self-Heal Test Code</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {testCode.trim()
+                          ? "AI will rewrite the failing lines — minimum change, all passing tests preserved."
+                          : "Click to paste the failing .spec.ts and let AI repair the broken lines."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleSelfHealClick}
+                    className="flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all bg-sky-600 hover:bg-sky-500 text-white shadow-lg"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Self-Heal Test Code
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Ticket Dispatch Action Group */}
+            <div className="rounded-xl border bg-surface-800 border-surface-600 p-4">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">
+                File as Ticket
+              </p>
+              <div className="flex flex-wrap gap-3 items-start">
+                {/* GitHub Issues */}
+                <div className="flex flex-col gap-1.5">
+                  {githubStatus === "success" && githubTicketUrl ? (
+                    <a
+                      href={githubTicketUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      GitHub Issue Created
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => void handleFileGitHubIssue()}
+                      disabled={githubStatus === "loading"}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-[#24292e] hover:bg-[#32383e] disabled:opacity-60 disabled:cursor-not-allowed text-white transition-colors"
+                    >
+                      {githubStatus === "loading" ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Github className="w-3.5 h-3.5" />
+                      )}
+                      {githubStatus === "loading" ? "Filing Issue…" : "File GitHub Issue"}
+                    </button>
+                  )}
+                  {githubStatus === "error" && githubErrorMsg && (
+                    <p className="text-[10px] text-red-400 max-w-[220px] leading-tight">{githubErrorMsg}</p>
+                  )}
+                </div>
+
+                {/* Jira */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={jiraProjectKey}
+                      onChange={(e) => {
+                        const v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+                        setJiraProjectKey(v);
+                        localStorage.setItem("qa-genius:jira-project-key", v);
+                      }}
+                      placeholder="KEY"
+                      maxLength={10}
+                      title="Jira project key (e.g. QA, BUG)"
+                      className="w-[68px] bg-surface-900 border border-surface-600 text-slate-200 text-xs rounded-lg px-2 py-2 font-mono placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-[#0052CC] focus:border-[#0052CC] uppercase"
+                    />
+                    {jiraStatus === "success" && jiraTicketUrl ? (
+                      <a
+                        href={jiraTicketUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Jira Ticket Created
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <button
+                        onClick={() => void handleFileJiraTicket()}
+                        disabled={jiraStatus === "loading"}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-[#0052CC] hover:bg-[#0747A6] disabled:opacity-60 disabled:cursor-not-allowed text-white transition-colors"
+                      >
+                        {jiraStatus === "loading" ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Bug className="w-3.5 h-3.5" />
+                        )}
+                        {jiraStatus === "loading" ? "Filing Ticket…" : "File Jira Ticket"}
+                      </button>
+                    )}
+                  </div>
+                  {(jiraStatus === "error" || jiraErrorMsg) && (
+                    <p className="text-[10px] text-red-400 max-w-[260px] leading-tight">{jiraErrorMsg}</p>
+                  )}
+                  <p className="text-[10px] text-slate-600">Enter project key, then file ticket</p>
+                </div>
+              </div>
             </div>
 
             {/* Category tag */}
@@ -352,6 +642,21 @@ export default function LogAnalyzerTab() {
           </div>
         )}
       </div>
+
+      {/* Self-Heal Modal */}
+      <SelfHealModal
+        open={selfHealOpen}
+        onClose={() => setSelfHealOpen(false)}
+        testCode={testCode}
+        errorOutput={rawLogs}
+        rootCause={result?.rootCause}
+        suggestedFix={result?.suggestedFix}
+        featureSlug={featureSlug}
+        fileName={fileName}
+        onSaved={() => {
+          setSelfHealOpen(false);
+        }}
+      />
     </div>
   );
 }

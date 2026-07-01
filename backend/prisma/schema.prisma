@@ -4,8 +4,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -34,6 +35,11 @@ model UserSettings {
   coralogixTeamName String? @map("coralogix_team_name")
   coralogixRegion   String? @default("EU") @map("coralogix_region")
   testsOutputDir    String? @map("tests_output_dir")
+  // Ticketing integrations
+  githubIssuesRepo  String? @map("github_issues_repo")
+  jiraDomain        String? @map("jira_domain")
+  jiraEmail         String? @map("jira_email")
+  jiraApiToken      String? @map("jira_api_token")
   updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

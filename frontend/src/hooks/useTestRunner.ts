@@ -20,6 +20,19 @@ export function useTestRunner() {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  const resetExecutionState = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsRunning(false);
+    setOutput("");
+    setProgress(0);
+    setStatusMessage("");
+    setResult(null);
+    setAnalysis(null);
+    setMcpSteps([]);
+    setIsAnalyzing(false);
+  }, []);
+
   const stopTest = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -151,6 +164,7 @@ export function useTestRunner() {
     result,
     runTest,
     stopTest,
+    resetExecutionState,
     isAnalyzing,
     mcpSteps,
     analysis,

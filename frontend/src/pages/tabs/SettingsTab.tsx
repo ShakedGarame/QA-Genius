@@ -11,7 +11,21 @@ import {
   Wifi,
   WifiOff,
   Github,
+  TicketCheck,
 } from "lucide-react";
+
+// The repository this QA-Genius instance is wired to — used as the default
+// value for the GitHub Issues repo field so users don't have to type it.
+const PLATFORM_GITHUB_REPO = "ShakedGarame/QA-Genius";
+
+// Tolerates a pasted GitHub URL and reduces it to "owner/repo" — the API
+// needs the bare path, not the browser address-bar URL.
+function normalizeGithubRepo(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  const match = trimmed.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+\/[^/]+)/i);
+  const repo = match ? match[1] : trimmed;
+  return repo.replace(/\.git$/i, "");
+}
 import clsx from "clsx";
 import { getStoredOpenAIKey, setStoredOpenAIKey, syncOpenAIKeyToStorage, isRealOpenAIKey } from "../../lib/apiKeys";
 import {
@@ -31,6 +45,10 @@ interface SettingsData {
   coralogix_team_name: string | null;
   coralogix_region: string | null;
   tests_output_dir: string | null;
+  github_issues_repo: string | null;
+  jira_domain: string | null;
+  jira_email: string | null;
+  jira_api_token: string | null;
   env_has_openai: boolean;
   env_has_anthropic: boolean;
   env_has_coralogix: boolean;
@@ -158,6 +176,11 @@ export default function SettingsTab() {
   const [coralogixTeam, setCoralogixTeam] = useState("");
   const [coralogixRegion, setCoralogixRegion] = useState("EU");
   const [testsDir, setTestsDir] = useState("");
+  // Ticketing integrations
+  const [githubIssuesRepo, setGithubIssuesRepo] = useState(PLATFORM_GITHUB_REPO);
+  const [jiraDomain, setJiraDomain] = useState("");
+  const [jiraEmail, setJiraEmail] = useState("");
+  const [jiraApiToken, setJiraApiToken] = useState("");
 
   // Coralogix connection test
   const [testingCoralogix, setTestingCoralogix] = useState(false);
@@ -201,6 +224,11 @@ export default function SettingsTab() {
       setCoralogixTeam(settings.coralogix_team_name ?? "");
       setCoralogixRegion(settings.coralogix_region ?? "EU");
       setTestsDir(settings.tests_output_dir ?? "");
+      // Auto-populate from saved settings; fall back to the known platform repo.
+      setGithubIssuesRepo(settings.github_issues_repo ?? PLATFORM_GITHUB_REPO);
+      setJiraDomain(settings.jira_domain ?? "");
+      setJiraEmail(settings.jira_email ?? "");
+      setJiraApiToken(settings.jira_api_token ?? "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load settings");
     } finally {
@@ -229,6 +257,13 @@ export default function SettingsTab() {
       body.coralogix_team_name = coralogixTeam;
       body.coralogix_region = coralogixRegion;
       body.tests_output_dir = testsDir;
+      const normalizedGithubIssuesRepo = normalizeGithubRepo(githubIssuesRepo);
+      setGithubIssuesRepo(normalizedGithubIssuesRepo);
+      body.github_issues_repo = normalizedGithubIssuesRepo;
+      body.jira_domain = jiraDomain;
+      body.jira_email = jiraEmail;
+      // Don't overwrite a masked token with the placeholder dots.
+      if (!jiraApiToken.includes("•")) body.jira_api_token = jiraApiToken;
 
       const res = await fetch("/api/me/settings", {
         method: "PUT",
@@ -244,7 +279,8 @@ export default function SettingsTab() {
       if (storedAfterSave) setOpenaiKey(storedAfterSave);
       const storedGitHubAfterSave = getStoredGitHubToken();
       if (storedGitHubAfterSave) setGithubToken(storedGitHubAfterSave);
-      if (!storedAfterSave && !storedGitHubAfterSave) await loadSettings();
+      // For Jira token: if the user entered a real value keep it visible; otherwise reload.
+      if (!storedAfterSave && !storedGitHubAfterSave && !jiraApiToken) await loadSettings();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -382,6 +418,96 @@ export default function SettingsTab() {
             <p className="text-[11px] text-sky-400 flex items-center gap-1">
               <CheckCircle2 className="w-3.5 h-3.5" />
               Run Test will dispatch workflow <code className="font-mono">trigger-playwright-test</code> on ShakedGarame/QA-Genius.
+            </p>
+          )}
+        </Section>
+
+        {/* ── GitHub Issues Integration ──────────────────────────────────────── */}
+        <Section
+          icon={Github}
+          title="GitHub Issues Integration"
+          badge={
+            <StatusBadge
+              active={!!githubIssuesRepo}
+              activeLabel="Configured"
+              inactiveLabel="Not Configured"
+            />
+          }
+        >
+          <div>
+            <label htmlFor="github-issues-repo" className="block text-sm font-medium text-slate-300 mb-1.5">
+              Repository Path
+            </label>
+            <input
+              id="github-issues-repo"
+              type="text"
+              value={githubIssuesRepo}
+              onChange={(e) => setGithubIssuesRepo(e.target.value)}
+              placeholder="owner/repo"
+              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono"
+            />
+            <p className="text-[11px] text-slate-600 mt-1">
+              Issues created from failure analyses will be filed here. Format: <code className="font-mono">owner/repo</code>
+            </p>
+          </div>
+          {githubIssuesRepo && (
+            <p className="text-[11px] text-sky-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Issues will be created in <code className="font-mono">{githubIssuesRepo}</code>
+            </p>
+          )}
+        </Section>
+
+        {/* ── Jira Cloud Integration ─────────────────────────────────────────── */}
+        <Section
+          icon={TicketCheck}
+          title="Jira Cloud Integration"
+          badge={
+            <StatusBadge
+              active={!!(jiraDomain && jiraEmail && jiraApiToken)}
+              activeLabel="Configured"
+              inactiveLabel="Not Configured"
+            />
+          }
+        >
+          <div>
+            <label htmlFor="jira-domain" className="block text-sm font-medium text-slate-300 mb-1.5">
+              Jira Domain
+            </label>
+            <input
+              id="jira-domain"
+              type="text"
+              value={jiraDomain}
+              onChange={(e) => setJiraDomain(e.target.value)}
+              placeholder="your-domain.atlassian.net"
+              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono"
+            />
+          </div>
+          <div>
+            <label htmlFor="jira-email" className="block text-sm font-medium text-slate-300 mb-1.5">
+              Account Email
+            </label>
+            <input
+              id="jira-email"
+              type="email"
+              value={jiraEmail}
+              onChange={(e) => setJiraEmail(e.target.value)}
+              placeholder="name@company.com"
+              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors"
+            />
+          </div>
+          <SecretInput
+            id="jira-api-token"
+            label="API Token"
+            value={jiraApiToken}
+            onChange={setJiraApiToken}
+            placeholder="Enter Jira API Token"
+            hint="Generate one at id.atlassian.com/manage-profile/security/api-tokens"
+          />
+          {jiraDomain && jiraEmail && jiraApiToken && (
+            <p className="text-[11px] text-sky-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Jira tickets will be created on <code className="font-mono">{jiraDomain}</code>
             </p>
           )}
         </Section>

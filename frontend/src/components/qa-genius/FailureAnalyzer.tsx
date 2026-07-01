@@ -6,6 +6,7 @@ import {
   BrainCircuit,
   ChevronDown,
   ChevronUp,
+  Sparkles,
   Wrench,
   Info,
   Network,
@@ -24,6 +25,7 @@ interface Props {
   onAnalyze: () => void;
   onAnalyzeWithGitHubLogs: () => void;
   onOpenSettings: () => void;
+  onSelfHeal?: () => void;
   isAnalyzing: boolean;
   mcpSteps: McpStep[];
   analysis: FailureAnalysis | null;
@@ -51,6 +53,7 @@ export default function FailureAnalyzer({
   onAnalyze,
   onAnalyzeWithGitHubLogs,
   onOpenSettings,
+  onSelfHeal,
   isAnalyzing,
   mcpSteps,
   analysis,
@@ -88,6 +91,16 @@ export default function FailureAnalyzer({
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <McpSettingsButton onClick={() => setMcpModalOpen(true)} hasCoralogix={hasCoralogix} />
+            {onSelfHeal && (
+              <button
+                type="button"
+                onClick={onSelfHeal}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-sm font-medium shadow-lg transition-all"
+              >
+                <Sparkles className="w-4 h-4" />
+                Self-Heal Test Code
+              </button>
+            )}
             <button
               type="button"
               onClick={handlePrimaryAction}

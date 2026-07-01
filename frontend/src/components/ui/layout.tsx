@@ -1,3 +1,4 @@
+import React from "react";
 import type { LucideIcon } from "lucide-react";
 import { Loader2 } from "lucide-react";
 import clsx from "clsx";
@@ -146,23 +147,23 @@ export function FormInput({
   );
 }
 
-export function FormTextarea({
-  className,
-  ...props
-}: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      className={clsx(
-        "w-full bg-surface-900 border border-surface-600 rounded-lg",
-        "px-4 py-3 text-xs text-slate-200 placeholder-slate-500",
-        "focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500",
-        "resize-none font-mono leading-relaxed transition-colors",
-        className
-      )}
-      {...props}
-    />
-  );
-}
+export const FormTextarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement>
+>(({ className, ...props }, ref) => (
+  <textarea
+    ref={ref}
+    className={clsx(
+      "w-full bg-surface-900 border border-surface-600 rounded-lg",
+      "px-4 py-3 text-xs text-slate-200 placeholder-slate-500",
+      "focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500",
+      "resize-none font-mono leading-relaxed transition-colors",
+      className
+    )}
+    {...props}
+  />
+));
+FormTextarea.displayName = "FormTextarea";
 
 export function SecondaryButton({
   children,

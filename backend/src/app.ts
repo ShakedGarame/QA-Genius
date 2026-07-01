@@ -23,6 +23,7 @@ import analyzeRouter from "./routes/analyze.js";
 import testsRouter from "./routes/tests.js";
 import logAnalysesRouter from "./routes/logAnalyses.js";
 import testRunsRouter from "./routes/testRuns.js";
+import issuesRouter from "./routes/issues.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { ensureDbUser } from "./middleware/ensureDbUser.js";
@@ -131,6 +132,7 @@ app.use("/api", requireAuth, ensureDbUser, analyzeRouter);
 app.use("/api", requireAuth, ensureDbUser, testsRouter);
 app.use("/api", requireAuth, ensureDbUser, logAnalysesRouter);
 app.use("/api", requireAuth, ensureDbUser, testRunsRouter);
+app.use("/api", requireAuth, ensureDbUser, issuesRouter);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {

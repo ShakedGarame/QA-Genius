@@ -17,6 +17,10 @@ export interface AnalyzerRoutePayload {
   source: string;
   autoTrigger: boolean;
   ts: number;
+  /** Optional context for Self-Heal — the failing spec code and its DB location */
+  testCode?: string;
+  featureSlug?: string;
+  fileName?: string;
 }
 
 /** Payload for loading a saved repository test into Test Generator and optionally auto-running. */
@@ -512,7 +516,11 @@ export function readPendingAnalyzerPayload(): AnalyzerRoutePayload | null {
 }
 
 /** Navigate to Log Analyzer with live failure logs and auto-trigger AI analysis. */
-export function routeFailureLogsToAnalyzer(logs: string, source = "playwright"): void {
+export function routeFailureLogsToAnalyzer(
+  logs: string,
+  source = "playwright",
+  context?: { testCode?: string; featureSlug?: string; fileName?: string }
+): void {
   const trimmed = logs.trim();
   if (!trimmed) return;
 
@@ -521,6 +529,7 @@ export function routeFailureLogsToAnalyzer(logs: string, source = "playwright"):
     source,
     autoTrigger: true,
     ts: Date.now(),
+    ...context,
   };
 
   sessionStorage.setItem(ANALYZER_PENDING_KEY, JSON.stringify(payload));

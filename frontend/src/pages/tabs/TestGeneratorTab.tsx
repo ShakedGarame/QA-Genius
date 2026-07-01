@@ -15,6 +15,7 @@ import { useTestRunner } from "../../hooks/useTestRunner";
 import { useAuth } from "../../hooks/useAuth";
 import { buildOpenAIKeyHeaders, readOpenAIKeyForRequest } from "../../lib/apiKeys";
 import { routeFailureLogsToAnalyzer, getActionableFailureLogs, readPendingGeneratorRun, type RunInGeneratorPayload } from "../../lib/cloudRunner";
+import SelfHealModal from "../../components/qa-genius/SelfHealModal";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
 import { MOCK_CODE_MAP } from "../../data/mockData";
 import { SidebarPanel, PanelBody, EmptyState } from "../../components/ui/layout";
@@ -353,10 +354,11 @@ export default function TestGeneratorTab() {
 
   const {
     isRunning, output, progress, statusMessage, result: runResult,
-    runTest, stopTest, isAnalyzing, mcpSteps, analysis, analyzeFailure,
+    runTest, stopTest, resetExecutionState, isAnalyzing, mcpSteps, analysis, analyzeFailure,
   } = useTestRunner();
   const { user } = useAuth();
   const lastAppliedRunTs = useRef(0);
+  const [selfHealOpen, setSelfHealOpen] = useState(false);
 
   const applyRunPayload = useCallback(
     async (detail: RunInGeneratorPayload) => {
@@ -474,6 +476,10 @@ export default function TestGeneratorTab() {
       return;
     }
 
+    // New generation — discard previous run output, artifacts, and failure analysis
+    resetExecutionState();
+    setStage("generated");
+
     setIsGenerating(true);
     setGenError(null);
 
@@ -550,14 +556,23 @@ export default function TestGeneratorTab() {
 
   const handleAnalyzeWithGitHubLogs = () => {
     const logs = getActionableFailureLogs(runResult, output);
-    routeFailureLogsToAnalyzer(logs, "playwright");
+    routeFailureLogsToAnalyzer(logs, "playwright", {
+      testCode: editedCode,
+      featureSlug: featureSlug ?? undefined,
+      fileName: savedAs ?? undefined,
+    });
   };
+
+  const handleSelfHeal = useCallback(() => {
+    setSelfHealOpen(true);
+  }, []);
 
   const handleOpenSettingsFromFailure = () => {
     window.dispatchEvent(new CustomEvent("qa-genius:navigate-tab", { detail: { tab: "settings" } }));
   };
 
   const handleReset = () => {
+    resetExecutionState();
     setStage("configure");
     setEditedCode("");
     setSavedAs(null);
@@ -571,7 +586,8 @@ export default function TestGeneratorTab() {
     setFeatureNameError("");
   };
 
-  const showFailureAnalyzer = stage === "executed" && runResult?.status === "failed" && !isRunning;
+  const showExecutionPanel = stage === "executed" || isRunning;
+  const showFailureAnalyzer = showExecutionPanel && runResult?.status === "failed" && !isRunning;
 
   const stageList: Stage[] = ["configure", "generated", "executed"];
   const stageIdx = stageList.indexOf(stage);
@@ -789,22 +805,37 @@ export default function TestGeneratorTab() {
                 fileName={savedAs ?? "generated.spec.ts"}
               />
               <div className="min-h-0 flex flex-col gap-3">
-                <div className="flex-1 min-h-0">
-                  <ExecutionConsole
-                    output={output}
-                    result={runResult}
-                    isRunning={isRunning}
-                    progress={progress}
-                    statusMessage={statusMessage}
-                  />
-                </div>
-                {runResult?.status === "failed" && !isRunning && Boolean(runResult?.cloudRunId) && (
-                  <div className="flex-shrink-0 max-h-[260px]">
-                    <ArtifactsGallery
-                      cloudRunId={runResult.cloudRunId}
-                      htmlUrl={runResult.htmlUrl}
-                      enabled={true}
-                      layout="row"
+                {showExecutionPanel ? (
+                  <>
+                    <div className="flex-1 min-h-0">
+                      <ExecutionConsole
+                        output={output}
+                        result={runResult}
+                        isRunning={isRunning}
+                        progress={progress}
+                        statusMessage={statusMessage}
+                      />
+                    </div>
+                    {runResult?.status === "failed" && !isRunning && Boolean(runResult?.cloudRunId) && (
+                      <div className="flex-shrink-0 max-h-[260px]">
+                        <ArtifactsGallery
+                          key={runResult.cloudRunId}
+                          cloudRunId={runResult.cloudRunId}
+                          htmlUrl={runResult.htmlUrl}
+                          enabled={true}
+                          layout="row"
+                        />
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex-1 min-h-0 flex items-center justify-center rounded-lg border border-dashed border-surface-600 bg-surface-900/40 px-6">
+                    <EmptyState
+                      icon={Play}
+                      accent="emerald"
+                      title="Ready to run"
+                      description="Your new tests are generated. Click Run Test above to execute them and see live output here."
+                      compact
                     />
                   </div>
                 )}
@@ -820,6 +851,7 @@ export default function TestGeneratorTab() {
                 onAnalyze={handleAnalyze}
                 onAnalyzeWithGitHubLogs={handleAnalyzeWithGitHubLogs}
                 onOpenSettings={handleOpenSettingsFromFailure}
+                onSelfHeal={handleSelfHeal}
                 isAnalyzing={isAnalyzing}
                 mcpSteps={mcpSteps}
                 analysis={analysis}
@@ -828,6 +860,18 @@ export default function TestGeneratorTab() {
           </>
         )}
       </div>
+
+      <SelfHealModal
+        open={selfHealOpen}
+        onClose={() => setSelfHealOpen(false)}
+        testCode={editedCode}
+        errorOutput={getActionableFailureLogs(runResult, output)}
+        rootCause={analysis?.rootCause}
+        suggestedFix={analysis?.suggestedFix}
+        featureSlug={featureSlug ?? undefined}
+        fileName={savedAs ?? undefined}
+        onSaved={() => setSelfHealOpen(false)}
+      />
     </div>
   );
 }
