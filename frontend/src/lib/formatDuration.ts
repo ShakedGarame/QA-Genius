@@ -29,14 +29,39 @@ export function formatDuration(ms: number | null | undefined): string {
   return `${totalSeconds}s`;
 }
 
+/** Always HH:MM:SS, zero-padded — used where durations must line up in a column. */
+export function formatDurationHMS(ms: number | null | undefined): string {
+  if (ms == null || ms <= 0) return "N/A";
+
+  const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return [hours, minutes, seconds].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
 /** Dashboard/table display — flags suspiciously fast cached passes. */
 export function formatDashboardDuration(
   ms: number | null | undefined,
   status?: string
 ): string {
   if (ms == null || ms <= 0) return "N/A";
-  if (status === "PASSED" && ms < 2000) return "< 5s";
-  return formatDuration(ms);
+  if (status === "PASSED" && ms < 2000) return `< ${formatDurationHMS(2000)}`;
+  return formatDurationHMS(ms);
+}
+
+/** Israeli date/time formatting (DD.MM.YYYY, 24h clock) regardless of browser locale. */
+export function formatIsraeliDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 }
 
 /** Runs still marked RUNNING within this window may show an active Stop control. */

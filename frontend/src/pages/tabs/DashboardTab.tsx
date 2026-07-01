@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   CheckCircle2,
@@ -10,10 +10,19 @@ import {
   Zap,
   PlayCircle,
   XCircle,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
 } from "lucide-react";
 import clsx from "clsx";
 import { cancelTestRun, fetchDashboardStats } from "../../lib/testRuns";
-import { formatDuration, formatDashboardDuration, getRunStatusDisplay, isRunActivelyRunning } from "../../lib/formatDuration";
+import {
+  formatDuration,
+  formatDashboardDuration,
+  formatIsraeliDateTime,
+  getRunStatusDisplay,
+  isRunActivelyRunning,
+} from "../../lib/formatDuration";
 import type { DashboardStats, TestRunRecord } from "../../types";
 import {
   TabToolbar,
@@ -53,13 +62,63 @@ function RunStatusBadge({ run }: { run: TestRunRecord }) {
   );
 }
 
+type SortKey = "feature" | "status" | "duration" | "runner" | "when";
+type SortDir = "asc" | "desc";
+
+function SortableHeader({
+  label,
+  sortKeyName,
+  activeKey,
+  dir,
+  onSort,
+}: {
+  label: string;
+  sortKeyName: SortKey;
+  activeKey: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKeyName === activeKey;
+  return (
+    <th
+      onClick={() => onSort(sortKeyName)}
+      className="cursor-pointer select-none hover:text-slate-300 transition-colors"
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (
+          dir === "asc" ? (
+            <ChevronUp className="w-3 h-3" />
+          ) : (
+            <ChevronDown className="w-3 h-3" />
+          )
+        ) : (
+          <ChevronsUpDown className="w-3 h-3 opacity-30" />
+        )}
+      </span>
+    </th>
+  );
+}
+
 export default function DashboardTab() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("when");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handleSort = useCallback((key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }, [sortKey]);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -111,6 +170,30 @@ export default function DashboardTab() {
   const running = stats?.runningRuns ?? 0;
   const passed = stats?.passedRuns ?? 0;
   const failed = stats?.failedRuns ?? 0;
+
+  const sortedRuns = useMemo(() => {
+    const rows = stats?.recentRuns ?? [];
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      switch (sortKey) {
+        case "feature":
+          return a.feature_name.localeCompare(b.feature_name) * dir;
+        case "status":
+          return (
+            getRunStatusDisplay(a.status, a.created_at).label.localeCompare(
+              getRunStatusDisplay(b.status, b.created_at).label
+            ) * dir
+          );
+        case "duration":
+          return ((a.duration_ms ?? 0) - (b.duration_ms ?? 0)) * dir;
+        case "runner":
+          return (a.runner ?? "").localeCompare(b.runner ?? "") * dir;
+        case "when":
+        default:
+          return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir;
+      }
+    });
+  }, [stats, sortKey, sortDir]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -227,16 +310,16 @@ export default function DashboardTab() {
                   <table className="qa-data-table">
                     <thead>
                       <tr>
-                        <th>Feature</th>
-                        <th>Status</th>
-                        <th>Duration</th>
-                        <th>Runner</th>
-                        <th>When</th>
+                        <SortableHeader label="Feature" sortKeyName="feature" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortableHeader label="Status" sortKeyName="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortableHeader label="Duration" sortKeyName="duration" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortableHeader label="Runner" sortKeyName="runner" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortableHeader label="When" sortKeyName="when" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                         <th className="w-[56px]" />
                       </tr>
                     </thead>
                     <tbody>
-                      {stats.recentRuns.map((run) => {
+                      {sortedRuns.map((run) => {
                         const canStop = isRunActivelyRunning(run.status, run.created_at);
                         return (
                           <tr
@@ -262,7 +345,7 @@ export default function DashboardTab() {
                               {formatDashboardDuration(run.duration_ms || null, run.status)}
                             </td>
                             <td className="text-slate-500 font-mono text-[10px]">{run.runner ?? "—"}</td>
-                            <td className="text-slate-500">{new Date(run.created_at).toLocaleString()}</td>
+                            <td className="text-slate-500" dir="ltr">{formatIsraeliDateTime(run.created_at)}</td>
                             <td>
                               {canStop && (
                                 <button
