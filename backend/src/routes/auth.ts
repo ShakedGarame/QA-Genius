@@ -101,20 +101,24 @@ router.get("/api/me", ensureDbUser, async (req: Request, res: Response) => {
   const user = getUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
-  const settings = await getUserSettings(user.id);
-  const hasEnvOpenAI = !!process.env.OPENAI_API_KEY;
+  try {
+    const settings = await getUserSettings(user.id);
+    const hasEnvOpenAI = !!process.env.OPENAI_API_KEY;
 
-  res.json({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    avatarUrl: user.avatar_url,
-    createdAt: user.created_at,
-    hasOpenAI: !!(settings?.openai_api_key) || hasEnvOpenAI,
-    hasEnvOpenAI,
-    hasAnthropic: !!(settings?.anthropic_api_key) || !!process.env.ANTHROPIC_API_KEY,
-    hasCoralogix: !!(settings?.coralogix_api_key),
-  });
+    res.json({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatarUrl: user.avatar_url,
+      createdAt: user.created_at,
+      hasOpenAI: !!(settings?.openai_api_key) || hasEnvOpenAI,
+      hasEnvOpenAI,
+      hasAnthropic: !!(settings?.anthropic_api_key) || !!process.env.ANTHROPIC_API_KEY,
+      hasCoralogix: !!(settings?.coralogix_api_key),
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load account" });
+  }
 });
 
 // ─── User settings (/api/me/settings) ────────────────────────────────────────
@@ -123,25 +127,29 @@ router.get("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
   const user = getUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
-  const settings = await getUserSettings(user.id);
-  const mask = (key: string | null) => (key ? `${key.slice(0, 6)}${"•".repeat(20)}` : null);
+  try {
+    const settings = await getUserSettings(user.id);
+    const mask = (key: string | null) => (key ? `${key.slice(0, 6)}${"•".repeat(20)}` : null);
 
-  res.json({
-    openai_api_key: mask(settings?.openai_api_key ?? null),
-    anthropic_api_key: mask(settings?.anthropic_api_key ?? null),
-    coralogix_api_key: mask(settings?.coralogix_api_key ?? null),
-    coralogix_team_name: settings?.coralogix_team_name ?? null,
-    coralogix_region: settings?.coralogix_region ?? "EU",
-    tests_output_dir: settings?.tests_output_dir ?? null,
-    github_issues_repo: settings?.github_issues_repo ?? null,
-    jira_domain: settings?.jira_domain ?? null,
-    jira_email: settings?.jira_email ?? null,
-    jira_api_token: mask(settings?.jira_api_token ?? null),
-    // Whether backend env provides AI without user needing to enter a key
-    env_has_openai: !!process.env.OPENAI_API_KEY,
-    env_has_anthropic: !!process.env.ANTHROPIC_API_KEY,
-    env_has_coralogix: !!process.env.CORALOGIX_API_KEY,
-  });
+    res.json({
+      openai_api_key: mask(settings?.openai_api_key ?? null),
+      anthropic_api_key: mask(settings?.anthropic_api_key ?? null),
+      coralogix_api_key: mask(settings?.coralogix_api_key ?? null),
+      coralogix_team_name: settings?.coralogix_team_name ?? null,
+      coralogix_region: settings?.coralogix_region ?? "EU",
+      tests_output_dir: settings?.tests_output_dir ?? null,
+      github_issues_repo: settings?.github_issues_repo ?? null,
+      jira_domain: settings?.jira_domain ?? null,
+      jira_email: settings?.jira_email ?? null,
+      jira_api_token: mask(settings?.jira_api_token ?? null),
+      // Whether backend env provides AI without user needing to enter a key
+      env_has_openai: !!process.env.OPENAI_API_KEY,
+      env_has_anthropic: !!process.env.ANTHROPIC_API_KEY,
+      env_has_coralogix: !!process.env.CORALOGIX_API_KEY,
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load settings" });
+  }
 });
 
 router.put("/api/me/settings", ensureDbUser, async (req: Request, res: Response) => {
@@ -161,23 +169,27 @@ router.put("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
     jira_api_token,
   } = req.body as Record<string, string | undefined>;
 
-  // Only update keys explicitly sent by the client — omitting a field must not wipe stored secrets.
-  await upsertUserSettings(user.id, {
-    ...(openai_api_key !== undefined ? { openai: openai_api_key?.trim() || null } : {}),
-    ...(anthropic_api_key !== undefined ? { anthropic: anthropic_api_key?.trim() || null } : {}),
-    ...(coralogix_api_key !== undefined ? { coralogix: coralogix_api_key?.trim() || null } : {}),
-    ...(coralogix_team_name !== undefined ? { coralogixTeamName: coralogix_team_name?.trim() || null } : {}),
-    ...(coralogix_region !== undefined ? { coralogixRegion: coralogix_region?.trim() || null } : {}),
-    ...(tests_output_dir !== undefined ? { testsOutputDir: tests_output_dir?.trim() || null } : {}),
-    ...(github_issues_repo !== undefined ? { githubIssuesRepo: github_issues_repo?.trim() || null } : {}),
-    ...(jira_domain !== undefined ? { jiraDomain: jira_domain?.trim() || null } : {}),
-    ...(jira_email !== undefined ? { jiraEmail: jira_email?.trim() || null } : {}),
-    ...(jira_api_token !== undefined && !jira_api_token.includes("•")
-      ? { jiraApiToken: jira_api_token?.trim() || null }
-      : {}),
-  });
+  try {
+    // Only update keys explicitly sent by the client — omitting a field must not wipe stored secrets.
+    await upsertUserSettings(user.id, {
+      ...(openai_api_key !== undefined ? { openai: openai_api_key?.trim() || null } : {}),
+      ...(anthropic_api_key !== undefined ? { anthropic: anthropic_api_key?.trim() || null } : {}),
+      ...(coralogix_api_key !== undefined ? { coralogix: coralogix_api_key?.trim() || null } : {}),
+      ...(coralogix_team_name !== undefined ? { coralogixTeamName: coralogix_team_name?.trim() || null } : {}),
+      ...(coralogix_region !== undefined ? { coralogixRegion: coralogix_region?.trim() || null } : {}),
+      ...(tests_output_dir !== undefined ? { testsOutputDir: tests_output_dir?.trim() || null } : {}),
+      ...(github_issues_repo !== undefined ? { githubIssuesRepo: github_issues_repo?.trim() || null } : {}),
+      ...(jira_domain !== undefined ? { jiraDomain: jira_domain?.trim() || null } : {}),
+      ...(jira_email !== undefined ? { jiraEmail: jira_email?.trim() || null } : {}),
+      ...(jira_api_token !== undefined && !jira_api_token.includes("•")
+        ? { jiraApiToken: jira_api_token?.trim() || null }
+        : {}),
+    });
 
-  res.json({ success: true });
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to save settings" });
+  }
 });
 
 export default router;

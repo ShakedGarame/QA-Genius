@@ -12,8 +12,10 @@ export function ensureDbUser(req: Request, res: Response, next: NextFunction) {
 
   void resolveDbUser(sessionUser)
     .then((dbUser) => {
+      if (res.headersSent) return;
       if (dbUser.id !== sessionUser.id) {
         req.login(dbUser, (err) => {
+          if (res.headersSent) return;
           if (err) {
             console.warn("[auth] session refresh failed:", err.message);
           }
@@ -25,6 +27,7 @@ export function ensureDbUser(req: Request, res: Response, next: NextFunction) {
     })
     .catch((err) => {
       console.error("[auth] ensureDbUser failed:", err instanceof Error ? err.message : err);
+      if (res.headersSent) return;
       res.status(500).json({
         error: "Could not resolve your account in the database. Please sign out and sign in again.",
       });
