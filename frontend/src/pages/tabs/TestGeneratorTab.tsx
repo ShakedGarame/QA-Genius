@@ -47,7 +47,7 @@ function FeatureNameInput({
       <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
         <Tag className="w-3 h-3" /> Feature Name *
       </label>
-      <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row gap-2">
         <input
           value={value}
           onChange={(e) => { onChange(e.target.value); }}
@@ -66,7 +66,7 @@ function FeatureNameInput({
           disabled={!value.trim() || isSaved}
           title={isSaved ? "Feature name saved" : "Save feature name"}
           className={clsx(
-            "flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
+            "flex-shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all w-full sm:w-auto",
             isSaved
               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default"
               : "bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white"
@@ -124,18 +124,20 @@ function InputTypeToggle({
               : "text-slate-400 hover:text-slate-200"
           )}
         >
-          <FileText className="w-3.5 h-3.5" /> UI Tests (PRD)
+          <FileText className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">UI (PRD)</span>
         </button>
         <button
           onClick={() => onChange("swagger")}
           className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all",
+            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
             value === "swagger"
               ? "bg-violet-600 text-white shadow"
               : "text-slate-400 hover:text-slate-200"
           )}
         >
-          <Globe className="w-3.5 h-3.5" /> API Tests (Swagger)
+          <Globe className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">API (Swagger)</span>
         </button>
       </div>
       <p className="text-[10px] text-slate-600 mt-1">
@@ -593,9 +595,9 @@ export default function TestGeneratorTab() {
   const stageIdx = stageList.indexOf(stage);
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* ── Left config panel ── */}
-      <SidebarPanel width="w-80">
+    <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 overflow-hidden">
+      {/* ── Config panel ── */}
+      <SidebarPanel width="lg:w-80" mobileExpanded={!genResult && !isGenerating}>
         <PanelBody className="p-4 space-y-4">
           {/* Stage breadcrumb */}
           <div className="flex items-center gap-1">
@@ -707,11 +709,23 @@ export default function TestGeneratorTab() {
           )}
           </div>
         )}
+
+        {/* Mobile hint when no tests yet — replaces squeezed side panel */}
+        {!genResult && !isGenerating && (
+          <div className="lg:hidden rounded-xl border border-dashed border-surface-600 bg-surface-900/40 px-4 py-3 text-center">
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Complete the steps above, then generated tests and the run console will appear here.
+            </p>
+          </div>
+        )}
         </PanelBody>
       </SidebarPanel>
 
-      {/* ── Right area: editor + console ── */}
-      <div className="qa-main-pane p-6 gap-4 overflow-auto flex flex-col">
+      {/* ── Editor + console — hidden on mobile until content exists ── */}
+      <div className={clsx(
+        "qa-main-pane p-4 sm:p-6 gap-4 overflow-auto flex flex-col flex-1 min-h-0 min-w-0",
+        !genResult && !isGenerating && "hidden lg:flex"
+      )}>
         {!genResult && !isGenerating && (
           <EmptyState
             icon={FileCode2}
@@ -749,8 +763,8 @@ export default function TestGeneratorTab() {
 
         {genResult && !isGenerating && (
           <>
-            <div className="flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <span className="text-xs text-slate-400">Generated Tests</span>
                 <span className={clsx(
                   "text-[10px] px-2 py-0.5 rounded-full border font-mono",
@@ -769,7 +783,7 @@ export default function TestGeneratorTab() {
                   {inputType === "swagger" ? "API" : "UI"}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-shrink-0 self-start sm:self-auto">
                 {isRunning ? (
                   <>
                     <span className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium select-none">
@@ -798,7 +812,7 @@ export default function TestGeneratorTab() {
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 grid grid-cols-2 gap-4" style={{ minHeight: "400px" }}>
+            <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-4" style={{ minHeight: "280px" }}>
               <TestEditor
                 code={editedCode}
                 onChange={setEditedCode}

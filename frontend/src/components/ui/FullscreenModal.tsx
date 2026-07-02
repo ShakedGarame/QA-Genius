@@ -100,7 +100,7 @@ export default function FullscreenModal({
       {/* Inner box — stop click propagation so clicking inside doesn't close */}
       <div
         className={clsx(
-          "relative flex flex-col w-11/12 max-w-6xl h-[80vh]",
+          "relative flex flex-col w-full sm:w-11/12 max-w-6xl h-[92vh] sm:h-[80vh]",
           "bg-slate-950 rounded-xl border border-slate-800 shadow-2xl",
           innerClassName
         )}
@@ -117,10 +117,10 @@ export default function FullscreenModal({
               type="button"
               onClick={onClose}
               title="Close (Esc)"
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors"
+              className="flex items-center gap-1 p-2 sm:px-2 sm:py-1 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors"
             >
               <X className="w-4 h-4" />
-              <span>Close</span>
+              <span className="hidden sm:inline">Close</span>
             </button>
           </div>
         </div>

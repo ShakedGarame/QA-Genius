@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   RefreshCw, Play, Trash2, FileCode2, Loader2,
   Globe, FileText, FlaskConical,
-  ChevronDown, ChevronRight, ExternalLink,
+  ChevronDown, ChevronRight, ExternalLink, ArrowLeft,
 } from "lucide-react";
 import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
@@ -195,6 +195,10 @@ export default function TestRepositoryTab() {
     setSelectedTest({ file, isMock: showMockData });
   }, [showMockData]);
 
+  const handleClearSelection = useCallback(() => {
+    setSelectedTest(null);
+  }, []);
+
   const handleRunInGenerator = useCallback(() => {
     if (!selectedTest || previewLoading || !previewCode) return;
     const { file, isMock } = selectedTest;
@@ -229,8 +233,12 @@ export default function TestRepositoryTab() {
   const featuresLabel = showMockData ? "sample features" : "features";
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      <SidebarPanel width="w-[420px]">
+    <div className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-hidden">
+      <SidebarPanel
+        width="lg:w-[420px]"
+        mobileExpanded={!selectedTest}
+        className={clsx(selectedTest && "hidden lg:flex", !selectedTest && "flex-1 lg:flex-none")}
+      >
         <PanelHeader>
           <div className="flex items-center gap-2 min-w-0">
             {features.length > 0 ? (
@@ -270,27 +278,39 @@ export default function TestRepositoryTab() {
         </PanelBody>
       </SidebarPanel>
 
-      <div className="qa-main-pane flex flex-col">
+      <div className={clsx("qa-main-pane flex flex-col flex-1 min-h-0", !selectedTest && "hidden lg:flex")}>
         {!selectedTest ? (
-          <EmptyState
-            icon={FileCode2}
-            accent="emerald"
-            title="Select a test to preview"
-            description="Choose a test file from the list on the left to view its source code."
-            hint='Click "Run Test" to open Test Generator and execute with the full-width terminal.'
-          />
+          <div className="hidden lg:flex flex-1">
+            <EmptyState
+              icon={FileCode2}
+              accent="emerald"
+              title="Select a test to preview"
+              description="Choose a test file from the list on the left to view its source code."
+              hint='Click "Run Test" to open Test Generator and execute with the full-width terminal.'
+            />
+          </div>
         ) : (
           <>
-            <div className="flex-shrink-0 flex items-center justify-between gap-4 px-5 py-3 border-b border-surface-600 bg-surface-800/40">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-100 truncate">{selectedTest.file.fileName}</p>
-                <p className="text-[11px] font-mono text-slate-500 truncate">{selectedTest.file.relativePath}</p>
+            <div className="flex-shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-surface-600 bg-surface-800/40">
+              <div className="flex items-start gap-2 min-w-0">
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="lg:hidden flex-shrink-0 p-2 -ml-1 rounded-lg text-slate-400 hover:text-white hover:bg-surface-700 transition-colors"
+                  aria-label="Back to test list"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{selectedTest.file.fileName}</p>
+                  <p className="text-[11px] font-mono text-slate-500 truncate">{selectedTest.file.relativePath}</p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={handleRunInGenerator}
                 disabled={previewLoading || !previewCode}
-                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-lg shadow-emerald-900/30 transition-all"
+                className="flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-lg shadow-emerald-900/30 transition-all w-full sm:w-auto"
               >
                 {previewLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />

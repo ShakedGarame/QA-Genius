@@ -16,7 +16,7 @@ export function TabToolbar({
   return (
     <div
       className={clsx(
-        "flex-shrink-0 flex items-center gap-4 px-6 py-3",
+        "flex-shrink-0 flex flex-wrap items-center gap-2 sm:gap-4 px-4 sm:px-6 py-2.5 sm:py-3",
         "border-b border-surface-600 bg-surface-800/40 backdrop-blur-sm",
         className
       )}
@@ -34,7 +34,7 @@ export function TabContent({
   className?: string;
 }) {
   return (
-    <div className={clsx("flex-1 overflow-y-auto p-6", className)}>
+    <div className={clsx("flex-1 overflow-y-auto p-4 sm:p-6", className)}>
       {children}
     </div>
   );
@@ -43,19 +43,27 @@ export function TabContent({
 // ── Sidebar panel (Repository, Generator config, Log Analyzer input) ─────────
 
 export function SidebarPanel({
-  width = "w-[420px]",
+  width = "lg:w-[420px]",
   children,
   className,
+  /** When true, panel fills available height on mobile (no 50vh cap). */
+  mobileExpanded = false,
 }: {
+  /** Tailwind width classes — use `lg:` prefix (e.g. `lg:w-80`). Full width on mobile. */
   width?: string;
   children: ReactNode;
   className?: string;
+  mobileExpanded?: boolean;
 }) {
   return (
     <div
       className={clsx(
+        "w-full min-w-0 flex-shrink-0 flex flex-col bg-surface-800/20",
+        "border-b lg:border-b-0 lg:border-r border-surface-600",
+        mobileExpanded
+          ? "flex-1 min-h-0 lg:flex-none lg:max-h-none"
+          : "max-h-[min(55vh,32rem)] lg:max-h-none",
         width,
-        "flex-shrink-0 border-r border-surface-600 flex flex-col bg-surface-800/20",
         className
       )}
     >
@@ -74,7 +82,7 @@ export function PanelHeader({
   return (
     <div
       className={clsx(
-        "flex items-center justify-between gap-3 px-5 py-3",
+        "flex flex-wrap items-center justify-between gap-2 sm:gap-3 px-4 sm:px-5 py-2.5 sm:py-3",
         "border-b border-surface-600 bg-surface-800/40",
         className
       )}
@@ -92,7 +100,7 @@ export function PanelBody({
   className?: string;
 }) {
   return (
-    <div className={clsx("flex-1 overflow-y-auto p-4 space-y-3", className)}>
+    <div className={clsx("flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3", className)}>
       {children}
     </div>
   );
@@ -138,7 +146,7 @@ export function FormInput({
     <input
       className={clsx(
         "w-full bg-surface-900 border border-surface-600 rounded-lg",
-        "px-3 py-2 text-sm text-slate-200 placeholder-slate-500",
+        "px-3 py-2.5 sm:py-2 text-sm text-slate-200 placeholder-slate-500",
         "focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition-colors",
         className
       )}
@@ -286,19 +294,19 @@ export function MetricCard({
   isNa?: boolean;
 }) {
   return (
-    <SurfaceCard padding="p-5" className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
-        <div className={clsx("w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br shadow-sm", accent)}>
-          <Icon className="w-4 h-4 text-white" aria-hidden />
+    <SurfaceCard padding="p-4 sm:p-5" className="flex flex-col gap-2 sm:gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
+        <div className={clsx("w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center bg-gradient-to-br shadow-sm flex-shrink-0", accent)}>
+          <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" aria-hidden />
         </div>
       </div>
       <div>
-        <p className={clsx("text-2xl font-bold tracking-tight", isNa ? "text-slate-500" : "text-white")}>
+        <p className={clsx("text-xl sm:text-2xl font-bold tracking-tight", isNa ? "text-slate-500" : "text-white")}>
           {value}
         </p>
         {subValue && <p className="text-xs text-slate-400 mt-0.5">{subValue}</p>}
-        <p className="text-xs text-slate-500 mt-1.5">{hint}</p>
+        <p className="text-[11px] sm:text-xs text-slate-500 mt-1 line-clamp-2">{hint}</p>
       </div>
     </SurfaceCard>
   );

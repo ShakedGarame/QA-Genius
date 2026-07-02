@@ -65,7 +65,7 @@ function NavButton({
       className={clsx(
         "w-full flex items-center gap-3 rounded-xl text-left transition-all",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
-        compact ? "px-3 py-2.5" : "px-3 py-3",
+        compact ? "px-3 py-2" : "px-3 py-3",
         isActive
           ? "bg-surface-700/90 text-white shadow-sm border border-surface-500/60"
           : "text-slate-400 hover:text-slate-100 hover:bg-surface-800/80 border border-transparent"
@@ -79,7 +79,7 @@ function NavButton({
         <Icon className="w-4 h-4 text-white" aria-hidden />
       </div>
       <div className="min-w-0 flex-1">
-        <p className={clsx("font-medium leading-tight", compact ? "text-xs" : "text-sm")}>{item.label}</p>
+        <p className={clsx("font-medium leading-tight", compact ? "text-sm" : "text-sm")}>{item.label}</p>
         {!compact && (
           <p className="text-[11px] text-slate-500 leading-snug mt-0.5 truncate">{item.description}</p>
         )}
@@ -89,9 +89,9 @@ function NavButton({
   );
 }
 
-// ─── UserDropdown — placed in the top-right header ───────────────────────────
+// ─── UserDropdown ─────────────────────────────────────────────────────────────
 
-function UserDropdown({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLogout: () => void; mobile?: boolean }) {
   const [open, setOpen] = useState(false);
 
   const initials = user.name
@@ -121,29 +121,32 @@ function UserDropdown({ user, onLogout }: { user: AuthUser; onLogout: () => void
         aria-expanded={open}
         aria-haspopup="true"
         aria-label="User menu"
-        className="flex items-center gap-2.5 rounded-xl px-3 py-2 hover:bg-surface-700 border border-transparent hover:border-surface-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+        className={clsx(
+          "flex items-center rounded-xl hover:bg-surface-700 border border-transparent hover:border-surface-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          mobile ? "p-1" : "gap-2.5 px-3 py-2"
+        )}
       >
         {avatar}
-        <div className="hidden sm:block min-w-0 text-left">
-          <p className="text-sm font-medium text-slate-200 truncate max-w-[140px]">{user.name}</p>
-          {user.email && (
-            <p className="text-[11px] text-slate-500 truncate max-w-[140px]">{user.email}</p>
-          )}
-        </div>
-        <ChevronDown
-          className={clsx("w-3.5 h-3.5 text-slate-500 flex-shrink-0 transition-transform", open && "rotate-180")}
-          aria-hidden
-        />
+        {!mobile && (
+          <>
+            <div className="hidden sm:block min-w-0 text-left">
+              <p className="text-sm font-medium text-slate-200 truncate max-w-[140px]">{user.name}</p>
+              {user.email && (
+                <p className="text-[11px] text-slate-500 truncate max-w-[140px]">{user.email}</p>
+              )}
+            </div>
+            <ChevronDown
+              className={clsx("w-3.5 h-3.5 text-slate-500 flex-shrink-0 transition-transform", open && "rotate-180")}
+              aria-hidden
+            />
+          </>
+        )}
       </button>
 
       {open && (
         <>
-          {/* Backdrop */}
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
-
-          {/* Dropdown — opens DOWNWARD from the header */}
           <div className="absolute right-0 top-full mt-1.5 z-40 w-52 bg-surface-700 border border-surface-500 rounded-xl shadow-2xl overflow-hidden">
-            {/* User info header */}
             <div className="px-4 py-3 border-b border-surface-600">
               <div className="flex items-center gap-2.5">
                 {avatar}
@@ -155,8 +158,6 @@ function UserDropdown({ user, onLogout }: { user: AuthUser; onLogout: () => void
                 </div>
               </div>
             </div>
-
-            {/* Actions */}
             <div className="py-1">
               <button
                 type="button"
@@ -174,6 +175,80 @@ function UserDropdown({ user, onLogout }: { user: AuthUser; onLogout: () => void
   );
 }
 
+// ─── Mobile drawer ────────────────────────────────────────────────────────────
+
+function MobileNavDrawer({
+  open,
+  onClose,
+  activeTab,
+  onSelectTab,
+}: {
+  open: boolean;
+  onClose: () => void;
+  activeTab: TabId;
+  onSelectTab: (id: TabId) => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+        onClick={onClose}
+        aria-hidden
+      />
+      <aside
+        id="mobile-nav"
+        className="fixed inset-y-0 right-0 z-50 w-[min(100vw-3rem,20rem)] flex flex-col bg-surface-800 border-l border-surface-600 shadow-2xl lg:hidden animate-fade-in"
+        aria-label="Mobile navigation"
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-surface-600">
+          <p className="text-sm font-semibold text-white">Menu</p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close menu"
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-surface-700 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-1">
+          {[...MAIN_NAV, ...BOTTOM_NAV].map((item) => (
+            <NavButton
+              key={item.id}
+              item={item}
+              isActive={activeTab === item.id}
+              onClick={() => onSelectTab(item.id)}
+              compact
+            />
+          ))}
+        </nav>
+
+        <div className="px-3 py-3 border-t border-surface-600">
+          <a
+            href="https://github.com/ShakedGarame/QA-Genius"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors rounded-lg px-3 py-2"
+          >
+            <Github className="w-4 h-4" aria-hidden />
+            Source on GitHub
+          </a>
+        </div>
+      </aside>
+    </>
+  );
+}
+
 // ─── AppLayout ────────────────────────────────────────────────────────────────
 
 export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
@@ -181,6 +256,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const activeItem = NAV_ITEMS.find((t) => t.id === activeTab) ?? NAV_ITEMS[0];
+  const ActiveIcon = activeItem.icon;
 
   useEffect(() => {
     const onNavigate = (event: Event) => {
@@ -197,8 +273,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
   };
 
   return (
-    <div className="flex h-screen bg-surface-900 overflow-hidden">
-      {/* Skip link */}
+    <div className="flex h-[100dvh] bg-surface-900 overflow-hidden">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-[100] focus:px-4 focus:py-2 focus:bg-sky-600 focus:text-white focus:rounded-lg focus:text-sm focus:font-medium"
@@ -211,7 +286,6 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
         className="hidden lg:flex w-72 flex-shrink-0 flex-col border-r border-surface-600 bg-surface-800/40"
         aria-label="Application navigation"
       >
-        {/* Logo */}
         <div className="px-5 py-6 border-b border-surface-600">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-900/30" aria-hidden>
@@ -224,7 +298,6 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           </div>
         </div>
 
-        {/* Main nav */}
         <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
           <p className="px-3 pb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
             Workspace
@@ -239,7 +312,6 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           ))}
         </nav>
 
-        {/* Bottom nav — Settings + GitHub (no user widget here) */}
         <div className="px-3 py-4 border-t border-surface-600 space-y-1.5">
           {BOTTOM_NAV.map((item) => (
             <NavButton
@@ -263,96 +335,70 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
 
       {/* ── Main column ── */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Mobile / tablet header */}
-        <header className="lg:hidden flex-shrink-0 border-b border-surface-600 bg-surface-800/80 backdrop-blur-sm">
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center flex-shrink-0" aria-hidden>
-                <BrainCircuit className="w-5 h-5 text-white" />
+        {/* Mobile header — single row, no duplicate tab bar */}
+        <header className="lg:hidden flex-shrink-0 border-b border-surface-600 bg-surface-800/90 backdrop-blur-sm safe-top">
+          <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center flex-shrink-0" aria-hidden>
+                <BrainCircuit className="w-4 h-4 text-white" />
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-bold text-white truncate">QA-Genius</p>
-                <p className="text-[10px] text-slate-500 truncate">{activeItem.label}</p>
+                <p className="text-sm font-bold text-white truncate leading-tight">QA-Genius</p>
+                <p className="text-[11px] text-slate-400 truncate flex items-center gap-1">
+                  <ActiveIcon className="w-3 h-3 flex-shrink-0" aria-hidden />
+                  {activeItem.label}
+                </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <UserDropdown user={user} onLogout={onLogout} />
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <UserDropdown user={user} onLogout={onLogout} mobile />
               <button
                 type="button"
-                onClick={() => setMobileNavOpen((v) => !v)}
+                onClick={() => setMobileNavOpen(true)}
                 aria-expanded={mobileNavOpen}
                 aria-controls="mobile-nav"
-                aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
-                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-surface-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                aria-label="Open menu"
+                className="p-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-surface-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
               >
-                {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                <Menu className="w-5 h-5" />
               </button>
             </div>
           </div>
-
-          {mobileNavOpen && (
-            <nav id="mobile-nav" className="px-3 pb-3 space-y-1 border-t border-surface-600/80 pt-3" aria-label="Mobile navigation">
-              {[...MAIN_NAV, ...BOTTOM_NAV].map((item) => (
-                <NavButton key={item.id} item={item} isActive={activeTab === item.id} onClick={() => selectTab(item.id)} compact />
-              ))}
-            </nav>
-          )}
-
-          {!mobileNavOpen && (
-            <nav className="flex gap-1 px-3 pb-3 overflow-x-auto scrollbar-thin" aria-label="Section tabs">
-              {[...MAIN_NAV, ...BOTTOM_NAV].map((item) => {
-                const Icon = item.icon;
-                const isActive = activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => selectTab(item.id)}
-                    aria-current={isActive ? "page" : undefined}
-                    className={clsx(
-                      "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-all",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
-                      isActive ? "bg-surface-700 text-white border border-surface-500/50" : "text-slate-500 hover:text-slate-200 hover:bg-surface-800"
-                    )}
-                  >
-                    <Icon className="w-3.5 h-3.5" aria-hidden />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </nav>
-          )}
         </header>
 
-        {/* Desktop page title bar — UserDropdown lives here */}
+        <MobileNavDrawer
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          activeTab={activeTab}
+          onSelectTab={selectTab}
+        />
+
+        {/* Desktop page title bar */}
         <header className="hidden lg:flex flex-shrink-0 items-center justify-between px-6 py-3 border-b border-surface-600 bg-surface-800/40 backdrop-blur-sm">
           <div>
             <h2 className="text-lg font-semibold text-white">{activeItem.label}</h2>
             <p className="text-sm text-slate-500 mt-0.5">{activeItem.description}</p>
           </div>
-
-          {/* User dropdown — top right */}
           <UserDropdown user={user} onLogout={onLogout} />
         </header>
 
-        {/* Tab panels — kept mounted to preserve in-progress work */}
-        <main id="main-content" className="flex-1 min-h-0 flex flex-col" tabIndex={-1}>
-          <div className={activeTab === "generator" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+        <main id="main-content" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden" tabIndex={-1}>
+          <div className={activeTab === "generator" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
             <TestGeneratorTab />
           </div>
-          <div className={activeTab === "repository" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+          <div className={activeTab === "repository" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
             <TestRepositoryTab />
           </div>
-          <div className={activeTab === "analyzer" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+          <div className={activeTab === "analyzer" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
             <LogAnalyzerTab />
           </div>
-          <div className={activeTab === "history" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+          <div className={activeTab === "history" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
             <HistoryTab />
           </div>
-          <div className={activeTab === "dashboard" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+          <div className={activeTab === "dashboard" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
             <DashboardTab />
           </div>
-          <div className={activeTab === "settings" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+          <div className={activeTab === "settings" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
             <SettingsTab />
           </div>
         </main>

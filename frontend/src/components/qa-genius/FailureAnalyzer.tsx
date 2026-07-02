@@ -77,7 +77,7 @@ export default function FailureAnalyzer({
     <>
       <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 overflow-hidden animate-slide-up">
         {/* ── Header row ── */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-red-500/20 gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between px-4 sm:px-5 py-4 border-b border-red-500/20 gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
             <div className="min-w-0">
@@ -89,23 +89,24 @@ export default function FailureAnalyzer({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 flex-shrink-0">
             <McpSettingsButton onClick={() => setMcpModalOpen(true)} hasCoralogix={hasCoralogix} />
             {onSelfHeal && (
               <button
                 type="button"
                 onClick={onSelfHeal}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-sm font-medium shadow-lg transition-all"
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-sm font-medium shadow-lg transition-all"
               >
                 <Sparkles className="w-4 h-4" />
-                Self-Heal Test Code
+                <span className="sm:hidden">Self-Heal</span>
+                <span className="hidden sm:inline">Self-Heal Test Code</span>
               </button>
             )}
             <button
               type="button"
               onClick={handlePrimaryAction}
               disabled={isAnalyzing}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium shadow-lg transition-all"
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium shadow-lg transition-all"
             >
               {isAnalyzing ? (
                 <Loader2 className="w-4 h-4 animate-spin" />

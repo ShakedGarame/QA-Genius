@@ -15,6 +15,7 @@ import {
   Sparkles,
   Wrench,
   Zap,
+  ArrowLeft,
 } from "lucide-react";
 import clsx from "clsx";
 import { RawLogAnalysisResponse } from "../../types";
@@ -105,6 +106,8 @@ export default function LogAnalyzerTab() {
   const [jiraProjectKey, setJiraProjectKey] = useState(
     () => localStorage.getItem("qa-genius:jira-project-key") ?? ""
   );
+  /** On mobile: after analysis, show results full-screen with back to input. */
+  const [mobileResultsView, setMobileResultsView] = useState(false);
 
   const activeSource = LOG_SOURCES.find((s) => s.value === source)!;
   const isPlaywright = HEAL_ELIGIBLE_SOURCES.includes(source);
@@ -223,6 +226,10 @@ export default function LogAnalyzerTab() {
     return () => window.removeEventListener("qa-genius:populate-log-analyzer", onPopulate);
   }, [applyPopulate]);
 
+  useEffect(() => {
+    if (result) setMobileResultsView(true);
+  }, [result]);
+
   const handleClear = () => {
     setRawLogs("");
     setTestCode("");
@@ -230,6 +237,7 @@ export default function LogAnalyzerTab() {
     setFileName(undefined);
     setResult(null);
     setError(null);
+    setMobileResultsView(false);
     setGithubStatus("idle");
     setGithubTicketUrl(null);
     setGithubErrorMsg(null);
@@ -311,14 +319,20 @@ export default function LogAnalyzerTab() {
   };
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* ── Left: Input panel ── */}
-      <SidebarPanel width="w-[480px]">
-        <PanelHeader className="flex-col items-start gap-1 !py-4">
-          <h2 className="text-sm font-semibold text-slate-200">Instant Log Analyzer</h2>
-          <p className="text-xs text-slate-500">
-            Paste any logs or errors — AI will explain the root cause in plain language
-          </p>
+    <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 overflow-hidden">
+      {/* ── Input panel ── */}
+      <SidebarPanel
+        width="lg:w-[480px]"
+        mobileExpanded={!result && !isAnalyzing}
+        className={clsx(mobileResultsView && result && "hidden lg:flex")}
+      >
+        <PanelHeader className="!items-start !py-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-slate-200">Instant Log Analyzer</h2>
+            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+              Paste logs — AI explains the root cause in plain language
+            </p>
+          </div>
         </PanelHeader>
 
         <PanelBody className="flex flex-col gap-4 p-5">
@@ -419,8 +433,25 @@ export default function LogAnalyzerTab() {
         </PanelBody>
       </SidebarPanel>
 
-      {/* ── Right: Analysis result ── */}
-      <div className="qa-main-pane overflow-auto">
+      {/* ── Analysis result ── */}
+      <div className={clsx(
+        "qa-main-pane overflow-auto flex-1 min-h-0 min-w-0 flex flex-col",
+        !result && !isAnalyzing && "hidden lg:flex"
+      )}>
+        {mobileResultsView && result && !isAnalyzing && (
+          <div className="lg:hidden flex-shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-surface-600 bg-surface-800/40">
+            <button
+              type="button"
+              onClick={() => setMobileResultsView(false)}
+              className="p-2 -ml-1 rounded-lg text-slate-400 hover:text-white hover:bg-surface-700 transition-colors"
+              aria-label="Back to log input"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <p className="text-sm font-medium text-slate-200">Analysis Result</p>
+          </div>
+        )}
+
         {!result && !isAnalyzing && (
           <EmptyState
             icon={BrainCircuit}
@@ -441,9 +472,9 @@ export default function LogAnalyzerTab() {
         )}
 
         {result && !isAnalyzing && (
-          <div className="p-6 space-y-5 animate-fade-in">
+          <div className="p-4 sm:p-6 space-y-5 animate-fade-in">
             {/* Header row: icon + title + badges */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
                   <BrainCircuit className="w-4 h-4 text-violet-400" />
@@ -517,7 +548,7 @@ export default function LogAnalyzerTab() {
             {/* Self-Heal CTA — shown for Playwright / test-failure results */}
             {isHealEligible && (
               <div className="rounded-xl border bg-surface-800 border-sky-500/25 p-4">
-                <div className="flex items-center justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 rounded-lg bg-sky-500/20 border border-sky-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
                       <Sparkles className="w-4 h-4 text-sky-400" />
@@ -534,7 +565,7 @@ export default function LogAnalyzerTab() {
 
                   <button
                     onClick={handleSelfHealClick}
-                    className="flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all bg-sky-600 hover:bg-sky-500 text-white shadow-lg"
+                    className="flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all bg-sky-600 hover:bg-sky-500 text-white shadow-lg w-full sm:w-auto"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     Self-Heal Test Code

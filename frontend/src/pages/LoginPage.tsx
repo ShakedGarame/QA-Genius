@@ -62,7 +62,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         </div>
 
         {/* Card */}
-        <div className="bg-surface-800 border border-surface-600 rounded-2xl p-8 shadow-2xl">
+        <div className="bg-surface-800 border border-surface-600 rounded-2xl p-6 sm:p-8 shadow-2xl">
           <h2 className="text-lg font-semibold text-white text-center mb-1">
             Welcome to your workspace
           </h2>

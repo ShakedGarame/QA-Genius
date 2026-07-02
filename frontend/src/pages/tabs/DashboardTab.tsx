@@ -198,16 +198,16 @@ export default function DashboardTab() {
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <TabToolbar>
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <BarChart3 className="w-4 h-4 text-sky-400 flex-shrink-0" />
-          <p className="text-sm text-slate-300 truncate">Analytics from your saved test executions</p>
+          <p className="text-xs sm:text-sm text-slate-300 truncate">Analytics from your test runs</p>
           {lastRefreshed && (
-            <span className="text-[11px] text-slate-600 hidden sm:inline">
+            <span className="text-[11px] text-slate-600 hidden md:inline flex-shrink-0">
               · {lastRefreshed.toLocaleTimeString()}
             </span>
           )}
         </div>
-        <SecondaryButton onClick={() => void load()} disabled={loading} className="ml-auto">
+        <SecondaryButton onClick={() => void load()} disabled={loading} className="flex-shrink-0">
           <RefreshCw className={clsx("w-3.5 h-3.5", loading && "animate-spin")} />
           Refresh
         </SecondaryButton>
@@ -244,7 +244,7 @@ export default function DashboardTab() {
 
         {stats && total > 0 && (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3 sm:gap-4">
               <MetricCard
                 label="Pass Rate"
                 value={formatPassRate(passRate)}
@@ -307,7 +307,8 @@ export default function DashboardTab() {
                   <span className="ml-2 text-xs font-normal text-slate-500">(last 30)</span>
                 </h3>
                 <SurfaceCard padding="p-0" className="overflow-hidden">
-                  <table className="qa-data-table">
+                  <div className="overflow-x-auto">
+                  <table className="qa-data-table min-w-[640px]">
                     <thead>
                       <tr>
                         <SortableHeader label="Feature" sortKeyName="feature" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
@@ -364,6 +365,7 @@ export default function DashboardTab() {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 </SurfaceCard>
               </div>
             )}

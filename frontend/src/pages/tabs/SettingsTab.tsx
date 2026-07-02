@@ -145,16 +145,16 @@ function Section({
 }) {
   return (
     <div className="bg-surface-800/50 border border-surface-600 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-surface-600 bg-surface-800/40">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-surface-700 flex items-center justify-center">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-5 py-3 sm:py-4 border-b border-surface-600 bg-surface-800/40">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-surface-700 flex items-center justify-center flex-shrink-0">
             <Icon className="w-4 h-4 text-slate-300" aria-hidden />
           </div>
           <h3 className="text-sm font-semibold text-white">{title}</h3>
         </div>
-        {badge}
+        {badge && <div className="flex-shrink-0">{badge}</div>}
       </div>
-      <div className="px-5 py-5 space-y-4">{children}</div>
+      <div className="px-4 sm:px-5 py-4 sm:py-5 space-y-4">{children}</div>
     </div>
   );
 }
@@ -542,7 +542,7 @@ export default function SettingsTab() {
             hint="Your Coralogix Logs Query API key. Enables live log fetching in the Log Analyzer."
           />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="coralogix-team" className="block text-sm font-medium text-slate-300 mb-1.5">
                 Team Name
@@ -623,7 +623,7 @@ export default function SettingsTab() {
         </Section>
 
         {/* ── Save button ────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between gap-4 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
           <p className="text-xs text-slate-600">
             Settings are saved per-account and never shared between users.
           </p>
@@ -632,7 +632,7 @@ export default function SettingsTab() {
             onClick={handleSave}
             disabled={saving}
             className={clsx(
-              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+              "flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 w-full sm:w-auto flex-shrink-0",
               saved
                 ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                 : "bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-900/30",

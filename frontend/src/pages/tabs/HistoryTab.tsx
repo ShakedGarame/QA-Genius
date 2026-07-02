@@ -125,79 +125,80 @@ function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false
   return (
     <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50 transition-all">
       {/* Card header */}
-      <div className="flex items-start gap-4 p-5 bg-surface-800/40">
-        {/* Type icon */}
-        <div className={clsx(
-          "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-          meta.inputType === "swagger"
-            ? "bg-violet-500/20 border border-violet-500/30"
-            : "bg-sky-500/20 border border-sky-500/30"
-        )}>
-          {meta.inputType === "swagger"
-            ? <Globe className="w-5 h-5 text-violet-400" />
-            : <FileText className="w-5 h-5 text-sky-400" />}
-        </div>
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 p-4 sm:p-5 bg-surface-800/40">
+        {/* Type icon + info */}
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className={clsx(
+            "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+            meta.inputType === "swagger"
+              ? "bg-violet-500/20 border border-violet-500/30"
+              : "bg-sky-500/20 border border-sky-500/30"
+          )}>
+            {meta.inputType === "swagger"
+              ? <Globe className="w-5 h-5 text-violet-400" />
+              : <FileText className="w-5 h-5 text-sky-400" />}
+          </div>
 
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-base font-bold text-slate-100">{meta.featureName}</h3>
-            {isMock && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                <FlaskConical className="w-2.5 h-2.5" aria-hidden />
-                Sample
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <h3 className="text-sm sm:text-base font-bold text-slate-100">{meta.featureName}</h3>
+              {isMock && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <FlaskConical className="w-2.5 h-2.5" aria-hidden />
+                  Sample
+                </span>
+              )}
+              <span className={clsx(
+                "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border",
+                meta.inputType === "swagger"
+                  ? "bg-violet-500/15 text-violet-400 border-violet-500/20"
+                  : "bg-sky-500/15 text-sky-400 border-sky-500/20"
+              )}>
+                {meta.inputType === "swagger" ? "API" : "UI"}
               </span>
+              <ExecutionStatusBadge status={meta.latestRunStatus} />
+            </div>
+
+            {meta.description && (
+              <p className="text-xs text-slate-500 mt-1 line-clamp-2">{meta.description}</p>
             )}
-            <span className={clsx(
-              "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border",
-              meta.inputType === "swagger"
-                ? "bg-violet-500/15 text-violet-400 border-violet-500/20"
-                : "bg-sky-500/15 text-sky-400 border-sky-500/20"
-            )}>
-              {meta.inputType === "swagger" ? "API Tests" : "UI Tests"}
-            </span>
-            <ExecutionStatusBadge status={meta.latestRunStatus} />
+
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-1 sm:gap-3 mt-2">
+              <span className="flex items-center gap-1 text-xs text-slate-500">
+                <CalendarDays className="w-3 h-3 flex-shrink-0" />
+                {formatRelativeDate(meta.createdAt)}
+              </span>
+              <span className="hidden sm:inline text-slate-600 text-[10px]">{formatAbsoluteDate(meta.createdAt)}</span>
+              <span className="flex items-center gap-1 text-xs text-slate-500">
+                <Layers className="w-3 h-3 flex-shrink-0" />
+                {tests.length} file{tests.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            {meta.prdText && (
+              <p className="text-[11px] text-slate-600 mt-2 font-mono bg-surface-700/50 px-2 py-1 rounded line-clamp-2">
+                &ldquo;{meta.prdText}&rdquo;
+              </p>
+            )}
           </div>
-
-          {meta.description && (
-            <p className="text-xs text-slate-500 mt-0.5 truncate">{meta.description}</p>
-          )}
-
-          <div className="flex items-center gap-3 mt-2">
-            <span className="flex items-center gap-1 text-xs text-slate-500">
-              <CalendarDays className="w-3 h-3" />
-              Created {formatRelativeDate(meta.createdAt)}
-              <span className="text-slate-600 text-[10px] ml-1">{formatAbsoluteDate(meta.createdAt)}</span>
-            </span>
-            <span className="flex items-center gap-1 text-xs text-slate-500">
-              <Layers className="w-3 h-3" />
-              {tests.length} test file{tests.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-
-          {meta.prdText && (
-            <p className="text-[11px] text-slate-600 mt-2 font-mono bg-surface-700/50 px-2 py-1 rounded line-clamp-1">
-              &ldquo;{meta.prdText}&rdquo;
-            </p>
-          )}
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0 w-full sm:w-auto">
           <button
             onClick={() => !isMock && onDeleteFeature(meta.slug)}
             disabled={isMock}
             title={isMock ? "Sample data cannot be deleted" : "Delete feature"}
             className={clsx(
-              "p-1 rounded transition-colors",
-              isMock ? "text-slate-700 cursor-not-allowed" : "hover:bg-surface-600 text-slate-600 hover:text-red-400"
+              "p-2 rounded-lg transition-colors",
+              isMock ? "text-slate-700 cursor-not-allowed" : "hover:bg-surface-600 text-slate-500 hover:text-red-400"
             )}
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="w-4 h-4" />
           </button>
           <button
             onClick={() => setExpanded((v) => !v)}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-surface-700/80 hover:bg-surface-700 transition-colors"
           >
             {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
             {expanded ? "Collapse" : "View Tests"}
@@ -412,34 +413,39 @@ export default function HistoryTab() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-      <TabToolbar>
-        <div className="flex items-center gap-1 bg-surface-900/80 rounded-lg p-1 border border-surface-600">
-          <button
-            type="button"
-            onClick={() => setView("tests")}
-            className={clsx(
-              "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              view === "tests" ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
-            )}
-          >
-            Test History
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("logs")}
-            className={clsx(
-              "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              view === "logs" ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
-            )}
-          >
-            Log Analyses
-          </button>
+      <TabToolbar className="flex-col items-stretch sm:flex-row sm:items-center">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-1 bg-surface-900/80 rounded-lg p-1 border border-surface-600 flex-1 sm:flex-none">
+            <button
+              type="button"
+              onClick={() => setView("tests")}
+              className={clsx(
+                "flex-1 sm:flex-none px-3 py-2 rounded-md text-xs font-medium transition-colors",
+                view === "tests" ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
+              )}
+            >
+              Test History
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("logs")}
+              className={clsx(
+                "flex-1 sm:flex-none px-3 py-2 rounded-md text-xs font-medium transition-colors",
+                view === "logs" ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
+              )}
+            >
+              Log Analyses
+            </button>
+          </div>
+          <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="sm:hidden flex-shrink-0">
+            <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} />
+          </SecondaryButton>
         </div>
 
         {view === "tests" && totalFeatures > 0 && (
-          <div className="flex items-center gap-3 text-xs text-slate-400">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
             <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5" aria-hidden />{totalFeatures} features</span>
-            <span className="flex items-center gap-1"><FileCode2 className="w-3.5 h-3.5" aria-hidden />{totalTests} test files</span>
+            <span className="flex items-center gap-1"><FileCode2 className="w-3.5 h-3.5" aria-hidden />{totalTests} files</span>
           </div>
         )}
 
@@ -447,17 +453,17 @@ export default function HistoryTab() {
           <span className="text-xs text-slate-400">{analyses.length} saved analyses</span>
         )}
 
-        <div className="flex-1 max-w-64 relative">
+        <div className="w-full sm:flex-1 sm:max-w-64 relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
           <FormInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={view === "tests" ? "Search features…" : "Search log analyses…"}
-            className="pl-8 py-1.5 text-xs"
+            className="pl-8 py-2 text-xs w-full"
           />
         </div>
 
-        <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="ml-auto">
+        <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="hidden sm:flex ml-auto">
           <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} />
           Refresh
         </SecondaryButton>
