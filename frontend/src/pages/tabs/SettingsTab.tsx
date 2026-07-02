@@ -52,6 +52,7 @@ interface SettingsData {
   env_has_openai: boolean;
   env_has_anthropic: boolean;
   env_has_coralogix: boolean;
+  env_has_github_pat: boolean;
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -315,6 +316,7 @@ export default function SettingsTab() {
   const aiActive = !!(data?.env_has_openai || data?.env_has_anthropic || hasRealOpenAIKey);
   const hasUserOpenAI = hasRealOpenAIKey;
   const coralogixActive = !!(data?.env_has_coralogix || coralogixKey);
+  const githubRunnerActive = !!(data?.env_has_github_pat || hasRealGitHubToken);
 
   if (loading) {
     return (
@@ -400,19 +402,31 @@ export default function SettingsTab() {
           title="Cloud Test Runner"
           badge={
             <StatusBadge
-              active={hasRealGitHubToken}
+              active={githubRunnerActive}
               activeLabel="GitHub Actions Ready"
-              inactiveLabel="Local / Demo Only"
+              inactiveLabel="Not Configured"
             />
           }
         >
+          {data?.env_has_github_pat && (
+            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-4 py-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <p className="text-xs text-emerald-300">
+                Backend <code className="font-mono">GITHUB_ACTIONS_PAT</code> is set — all visitors can run tests without entering a token.
+              </p>
+            </div>
+          )}
           <SecretInput
             id="github-token"
             label="GitHub Personal Access Token"
             value={githubToken}
             onChange={handleGitHubTokenChange}
             placeholder="ghp_… or github_pat_…"
-            hint="Required on Vercel to trigger real Playwright runs via GitHub Actions. Needs repo scope. Saved automatically in this browser."
+            hint={
+              data?.env_has_github_pat
+                ? "Optional: your personal token overrides the server token for this browser only."
+                : "Required on Vercel to trigger Playwright runs via GitHub Actions. Needs repo scope. Or set GITHUB_ACTIONS_PAT in Vercel for all visitors."
+            }
           />
           {hasRealGitHubToken && (
             <p className="text-[11px] text-sky-400 flex items-center gap-1">

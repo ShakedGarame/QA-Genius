@@ -313,13 +313,6 @@ export async function executeTestRun(
 ): Promise<RunTestResult | null> {
   if (options?.signal?.aborted) return null;
 
-  if (shouldUseGitHubCloudRunner() && !requireGitHubTokenForCloudRun()) {
-    handlers.onOutputAppend?.(
-      "Error: Add a GitHub PAT in Settings → Cloud Test Runner to run tests via GitHub Actions.\n"
-    );
-    return null;
-  }
-
   const streamStartedAt = Date.now();
   const res = await fetch("/api/run-test", {
     method: "POST",
@@ -498,10 +491,6 @@ export function buildRunTestHeaders(): Record<string, string> {
     "Content-Type": "application/json",
     ...buildGitHubTokenHeaders(),
   };
-}
-
-export function requireGitHubTokenForCloudRun(): string | null {
-  return readGitHubTokenForRequest();
 }
 
 export function readPendingAnalyzerPayload(): AnalyzerRoutePayload | null {

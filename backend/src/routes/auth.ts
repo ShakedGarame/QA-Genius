@@ -115,6 +115,7 @@ router.get("/api/me", ensureDbUser, async (req: Request, res: Response) => {
       hasEnvOpenAI,
       hasAnthropic: !!(settings?.anthropic_api_key) || !!process.env.ANTHROPIC_API_KEY,
       hasCoralogix: !!(settings?.coralogix_api_key),
+      hasEnvGitHubPat: !!process.env.GITHUB_ACTIONS_PAT,
     });
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load account" });
@@ -146,6 +147,7 @@ router.get("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
       env_has_openai: !!process.env.OPENAI_API_KEY,
       env_has_anthropic: !!process.env.ANTHROPIC_API_KEY,
       env_has_coralogix: !!process.env.CORALOGIX_API_KEY,
+      env_has_github_pat: !!process.env.GITHUB_ACTIONS_PAT,
     });
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load settings" });

@@ -105,7 +105,7 @@ async function runViaGitHubActions(
   if (!githubToken) {
     sendSSE(res, "error", {
       message:
-        "GitHub token missing. Open Settings → Cloud Test Runner, paste a GitHub PAT (repo scope), then try again.",
+        "Cloud test runner is not configured. The site owner must add GITHUB_ACTIONS_PAT in Vercel environment variables (or paste a GitHub PAT in Settings → Cloud Test Runner).",
     });
     res.end();
     return;
