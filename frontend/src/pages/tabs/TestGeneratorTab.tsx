@@ -3,7 +3,7 @@ import { useDropzone } from "react-dropzone";
 import {
   Play, Loader2, Sparkles, FileCode2, AlertCircle,
   CheckCircle2, RotateCcw, Save, Upload, FileText,
-  Code2, Globe, Tag, X, Square,
+  Code2, Globe, Tag, X, Square, ChevronUp,
 } from "lucide-react";
 import clsx from "clsx";
 import StoryPanel from "../../components/qa-genius/StoryPanel";
@@ -593,11 +593,23 @@ export default function TestGeneratorTab() {
 
   const stageList: Stage[] = ["configure", "generated", "executed"];
   const stageIdx = stageList.indexOf(stage);
+  const hasOutputPane = Boolean(genResult || isGenerating);
+  const [mobileConfigOpen, setMobileConfigOpen] = useState(true);
+
+  useEffect(() => {
+    if (hasOutputPane) setMobileConfigOpen(false);
+  }, [hasOutputPane]);
 
   return (
-    <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 overflow-hidden">
+    <div className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 min-w-0 lg:overflow-hidden">
       {/* ── Config panel ── */}
-      <SidebarPanel width="lg:w-80" mobileExpanded={!genResult && !isGenerating}>
+      <SidebarPanel
+        width="lg:w-80"
+        className={clsx(
+          hasOutputPane && !mobileConfigOpen && "hidden lg:flex",
+          hasOutputPane && mobileConfigOpen && "lg:flex"
+        )}
+      >
         <PanelBody className="p-4 space-y-4">
           {/* Stage breadcrumb */}
           <div className="flex items-center gap-1">
@@ -710,22 +722,36 @@ export default function TestGeneratorTab() {
           </div>
         )}
 
-        {/* Mobile hint when no tests yet — replaces squeezed side panel */}
-        {!genResult && !isGenerating && (
+        {/* Mobile hint when no tests yet */}
+        {!hasOutputPane && (
           <div className="lg:hidden rounded-xl border border-dashed border-surface-600 bg-surface-900/40 px-4 py-3 text-center">
             <p className="text-xs text-slate-500 leading-relaxed">
-              Complete the steps above, then generated tests and the run console will appear here.
+              Complete the steps above, then generated tests and the run console will appear below.
             </p>
           </div>
         )}
         </PanelBody>
       </SidebarPanel>
 
-      {/* ── Editor + console — hidden on mobile until content exists ── */}
+      {/* ── Editor + console ── */}
       <div className={clsx(
-        "qa-main-pane p-4 sm:p-6 gap-4 overflow-auto flex flex-col flex-1 min-h-0 min-w-0",
-        !genResult && !isGenerating && "hidden lg:flex"
+        "qa-main-pane p-4 sm:p-6 gap-4 flex flex-col min-w-0",
+        "lg:flex-1 lg:min-h-0 lg:overflow-auto",
+        !hasOutputPane && "hidden lg:flex"
       )}>
+        {hasOutputPane && (
+          <button
+            type="button"
+            onClick={() => setMobileConfigOpen((v) => !v)}
+            className="lg:hidden flex items-center justify-center gap-2 w-full py-2.5 rounded-lg text-xs font-medium text-slate-300 bg-surface-800 border border-surface-600 hover:bg-surface-700 transition-colors flex-shrink-0"
+          >
+            {mobileConfigOpen ? (
+              <><ChevronUp className="w-4 h-4" /> Hide setup — show tests</>
+            ) : (
+              <><Upload className="w-4 h-4" /> Show setup (feature name, PRD)</>
+            )}
+          </button>
+        )}
         {!genResult && !isGenerating && (
           <EmptyState
             icon={FileCode2}
@@ -812,16 +838,18 @@ export default function TestGeneratorTab() {
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-4" style={{ minHeight: "280px" }}>
-              <TestEditor
-                code={editedCode}
-                onChange={setEditedCode}
-                fileName={savedAs ?? "generated.spec.ts"}
-              />
-              <div className="min-h-0 flex flex-col gap-3">
+            <div className="flex flex-col xl:grid xl:grid-cols-2 gap-4 pb-6">
+              <div className="h-[min(360px,50vh)] lg:h-auto lg:min-h-0 xl:min-h-[280px]">
+                <TestEditor
+                  code={editedCode}
+                  onChange={setEditedCode}
+                  fileName={savedAs ?? "generated.spec.ts"}
+                />
+              </div>
+              <div className="flex flex-col gap-3 min-h-[320px] lg:min-h-0 lg:flex-1">
                 {showExecutionPanel ? (
                   <>
-                    <div className="flex-1 min-h-0">
+                    <div className="h-[min(380px,55vh)] lg:h-auto lg:flex-1 lg:min-h-0">
                       <ExecutionConsole
                         output={output}
                         result={runResult}

@@ -46,23 +46,17 @@ export function SidebarPanel({
   width = "lg:w-[420px]",
   children,
   className,
-  /** When true, panel fills available height on mobile (no 50vh cap). */
-  mobileExpanded = false,
 }: {
   /** Tailwind width classes — use `lg:` prefix (e.g. `lg:w-80`). Full width on mobile. */
   width?: string;
   children: ReactNode;
   className?: string;
-  mobileExpanded?: boolean;
 }) {
   return (
     <div
       className={clsx(
         "w-full min-w-0 flex-shrink-0 flex flex-col bg-surface-800/20",
         "border-b lg:border-b-0 lg:border-r border-surface-600",
-        mobileExpanded
-          ? "flex-1 min-h-0 lg:flex-none lg:max-h-none"
-          : "max-h-[min(55vh,32rem)] lg:max-h-none",
         width,
         className
       )}

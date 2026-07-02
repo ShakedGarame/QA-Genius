@@ -236,7 +236,6 @@ export default function TestRepositoryTab() {
     <div className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-hidden">
       <SidebarPanel
         width="lg:w-[420px]"
-        mobileExpanded={!selectedTest}
         className={clsx(selectedTest && "hidden lg:flex", !selectedTest && "flex-1 lg:flex-none")}
       >
         <PanelHeader>

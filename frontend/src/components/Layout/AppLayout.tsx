@@ -382,23 +382,23 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           <UserDropdown user={user} onLogout={onLogout} />
         </header>
 
-        <main id="main-content" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden" tabIndex={-1}>
-          <div className={activeTab === "generator" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
+        <main id="main-content" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-y-auto lg:overflow-hidden" tabIndex={-1}>
+          <div className={activeTab === "generator" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
             <TestGeneratorTab />
           </div>
-          <div className={activeTab === "repository" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
+          <div className={activeTab === "repository" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
             <TestRepositoryTab />
           </div>
-          <div className={activeTab === "analyzer" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
+          <div className={activeTab === "analyzer" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
             <LogAnalyzerTab />
           </div>
-          <div className={activeTab === "history" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
+          <div className={activeTab === "history" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
             <HistoryTab />
           </div>
-          <div className={activeTab === "dashboard" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
+          <div className={activeTab === "dashboard" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
             <DashboardTab />
           </div>
-          <div className={activeTab === "settings" ? "flex flex-col flex-1 min-h-0 min-w-0" : "hidden"}>
+          <div className={activeTab === "settings" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
             <SettingsTab />
           </div>
         </main>

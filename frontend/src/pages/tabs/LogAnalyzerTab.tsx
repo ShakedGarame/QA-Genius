@@ -323,7 +323,6 @@ export default function LogAnalyzerTab() {
       {/* ── Input panel ── */}
       <SidebarPanel
         width="lg:w-[480px]"
-        mobileExpanded={!result && !isAnalyzing}
         className={clsx(mobileResultsView && result && "hidden lg:flex")}
       >
         <PanelHeader className="!items-start !py-3">

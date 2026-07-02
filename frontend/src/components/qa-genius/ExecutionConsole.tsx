@@ -84,7 +84,7 @@ export default function ExecutionConsole({
           </div>
 
           {isRunning && statusMessage && (
-            <span className="hidden md:flex items-center gap-1.5 text-xs text-sky-400 min-w-0 flex-1 justify-center truncate px-1">
+            <span className="flex items-center gap-1.5 text-xs text-sky-400 min-w-0 flex-1 justify-end sm:justify-center truncate px-1">
               <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
               <span className="truncate">{statusMessage}</span>
             </span>
