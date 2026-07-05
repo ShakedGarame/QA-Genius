@@ -130,7 +130,9 @@ router.get("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
 
   try {
     const settings = await getUserSettings(user.id);
-    const mask = (key: string | null) => (key ? `${key.slice(0, 6)}${"•".repeat(20)}` : null);
+    // Never leak any real characters to the client — a fixed-length placeholder
+    // only signals "configured", it must not help narrow down the real secret.
+    const mask = (key: string | null) => (key ? "•".repeat(20) : null);
 
     res.json({
       openai_api_key: mask(settings?.openai_api_key ?? null),

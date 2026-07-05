@@ -12,7 +12,14 @@ import {
   WifiOff,
   Github,
   TicketCheck,
+  Lock,
 } from "lucide-react";
+import { useAuth } from "../../hooks/useAuth";
+
+// Shared demo account — every anonymous visitor lands on this profile, so
+// integration credentials must stay read-only or one guest could overwrite
+// what every other guest (and the resume owner) sees.
+const GUEST_EMAIL = "guest@qa-genius.com";
 
 // The repository this QA-Genius instance is wired to — used as the default
 // value for the GitHub Issues repo field so users don't have to type it.
@@ -88,6 +95,7 @@ function SecretInput({
   onChange,
   placeholder,
   hint,
+  disabled,
 }: {
   id: string;
   label: string;
@@ -95,6 +103,7 @@ function SecretInput({
   onChange: (v: string) => void;
   placeholder?: string;
   hint?: string;
+  disabled?: boolean;
 }) {
   const [show, setShow] = useState(false);
   const isMasked = value.includes("•");
@@ -113,9 +122,10 @@ function SecretInput({
           placeholder={placeholder ?? "Enter key…"}
           autoComplete="off"
           spellCheck={false}
-          className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 pr-10 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono"
+          disabled={disabled}
+          className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 pr-10 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
         />
-        {!isMasked && value && (
+        {!disabled && !isMasked && value && (
           <button
             type="button"
             onClick={() => setShow((v) => !v)}
@@ -163,6 +173,13 @@ function Section({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function SettingsTab() {
+  const { user } = useAuth();
+  const isGuest = user?.email?.toLowerCase() === GUEST_EMAIL;
+
+  if (import.meta.env.DEV) {
+    console.debug("[SettingsTab] user.email:", user?.email, "isGuest:", isGuest);
+  }
+
   const [data, setData] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -240,6 +257,7 @@ export default function SettingsTab() {
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
   const handleSave = async () => {
+    if (isGuest) return; // Guests never get to persist changes to the shared demo account.
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -330,6 +348,15 @@ export default function SettingsTab() {
     <TabContent>
       <div className="max-w-2xl mx-auto space-y-6">
 
+        {isGuest && (
+          <div className="flex items-center gap-2 bg-slate-500/10 border border-slate-500/25 rounded-xl px-4 py-2.5">
+            <Lock className="w-4 h-4 text-slate-400 flex-shrink-0" />
+            <p className="text-xs text-slate-300">
+              🔒 Secure Enterprise Settings (Read-Only for Demo) — integration credentials are hidden and locked for guest visitors.
+            </p>
+          </div>
+        )}
+
         {/* Error */}
         {error && (
           <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3">
@@ -365,6 +392,7 @@ export default function SettingsTab() {
             value={openaiKey}
             onChange={handleOpenAIKeyChange}
             placeholder="sk-…"
+            disabled={isGuest}
             hint={
               data?.env_has_openai
                 ? "Optional: your key takes priority over the backend environment key."
@@ -392,6 +420,7 @@ export default function SettingsTab() {
             value={anthropicKey}
             onChange={setAnthropicKey}
             placeholder="sk-ant-…"
+            disabled={isGuest}
             hint="Fallback AI provider used when no OpenAI key is available."
           />
         </Section>
@@ -422,6 +451,7 @@ export default function SettingsTab() {
             value={githubToken}
             onChange={handleGitHubTokenChange}
             placeholder="ghp_… or github_pat_…"
+            disabled={isGuest}
             hint={
               data?.env_has_github_pat
                 ? "Optional: your personal token overrides the server token for this browser only."
@@ -458,7 +488,8 @@ export default function SettingsTab() {
               value={githubIssuesRepo}
               onChange={(e) => setGithubIssuesRepo(e.target.value)}
               placeholder="owner/repo"
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono"
+              disabled={isGuest}
+              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <p className="text-[11px] text-slate-600 mt-1">
               Issues created from failure analyses will be filed here. Format: <code className="font-mono">owner/repo</code>
@@ -494,7 +525,8 @@ export default function SettingsTab() {
               value={jiraDomain}
               onChange={(e) => setJiraDomain(e.target.value)}
               placeholder="your-domain.atlassian.net"
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono"
+              disabled={isGuest}
+              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
           <div>
@@ -507,7 +539,8 @@ export default function SettingsTab() {
               value={jiraEmail}
               onChange={(e) => setJiraEmail(e.target.value)}
               placeholder="name@company.com"
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors"
+              disabled={isGuest}
+              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
           <SecretInput
@@ -516,6 +549,7 @@ export default function SettingsTab() {
             value={jiraApiToken}
             onChange={setJiraApiToken}
             placeholder="Enter Jira API Token"
+            disabled={isGuest}
             hint="Generate one at id.atlassian.com/manage-profile/security/api-tokens"
           />
           {jiraDomain && jiraEmail && jiraApiToken && (
@@ -553,6 +587,7 @@ export default function SettingsTab() {
             value={coralogixKey}
             onChange={(v) => { setCoralogixKey(v); setCoralogixStatus("idle"); }}
             placeholder="cxtp_…"
+            disabled={isGuest}
             hint="Your Coralogix Logs Query API key. Enables live log fetching in the Log Analyzer."
           />
 
@@ -567,7 +602,8 @@ export default function SettingsTab() {
                 value={coralogixTeam}
                 onChange={(e) => setCoralogixTeam(e.target.value)}
                 placeholder="my-team"
-                className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors"
+                disabled={isGuest}
+                className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
             <div>
@@ -578,7 +614,8 @@ export default function SettingsTab() {
                 id="coralogix-region"
                 value={coralogixRegion}
                 onChange={(e) => setCoralogixRegion(e.target.value)}
-                className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 outline-none transition-colors"
+                disabled={isGuest}
+                className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="EU">EU (Europe)</option>
                 <option value="US">US (United States)</option>
@@ -627,7 +664,8 @@ export default function SettingsTab() {
               value={testsDir}
               onChange={(e) => setTestsDir(e.target.value)}
               placeholder="/Users/you/my-project/tests/e2e"
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono"
+              disabled={isGuest}
+              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <p className="text-[11px] text-slate-600 mt-1">
               Absolute path where generated Playwright test folders are written.
@@ -639,20 +677,23 @@ export default function SettingsTab() {
         {/* ── Save button ────────────────────────────────────────────────────── */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
           <p className="text-xs text-slate-600">
-            Settings are saved per-account and never shared between users.
+            {isGuest
+              ? "ℹ️ Settings are read-only in demo mode."
+              : "Settings are saved per-account and never shared between users."}
           </p>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className={clsx(
-              "flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 w-full sm:w-auto flex-shrink-0",
-              saved
-                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                : "bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-900/30",
-              saving && "opacity-60"
-            )}
-          >
+          {!isGuest && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className={clsx(
+                "flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 w-full sm:w-auto flex-shrink-0",
+                saved
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                  : "bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-900/30",
+                saving && "opacity-60"
+              )}
+            >
             {saving ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
             ) : saved ? (
@@ -660,8 +701,9 @@ export default function SettingsTab() {
             ) : (
               <Save className="w-4 h-4" />
             )}
-            {saving ? "Saving…" : saved ? "Saved!" : "Save Settings"}
-          </button>
+              {saving ? "Saving…" : saved ? "Saved!" : "Save Settings"}
+            </button>
+          )}
         </div>
       </div>
     </TabContent>
