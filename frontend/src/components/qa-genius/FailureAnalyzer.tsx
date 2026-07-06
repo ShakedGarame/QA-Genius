@@ -77,7 +77,7 @@ export default function FailureAnalyzer({
     <>
       <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 overflow-hidden animate-slide-up">
         {/* ── Header row ── */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between px-4 sm:px-5 py-4 border-b border-red-500/20 gap-3">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between px-4 sm:px-5 py-4 border-b border-red-500/20 gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
             <div className="min-w-0">

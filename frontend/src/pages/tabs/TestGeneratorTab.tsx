@@ -847,8 +847,8 @@ export default function TestGeneratorTab() {
               </div>
             </div>
 
-            <div className="flex flex-col xl:grid xl:grid-cols-2 gap-4 pb-6">
-              <div className="h-[min(360px,50vh)] lg:h-auto lg:min-h-0 xl:min-h-[280px]">
+            <div className="flex flex-col lg:grid lg:grid-cols-2 gap-4 pb-6 lg:flex-1 lg:min-h-0 lg:pb-0 lg:overflow-hidden">
+              <div className="h-[min(360px,50vh)] lg:h-auto lg:min-h-0">
                 <Suspense
                   fallback={
                     <div className="w-full h-full flex items-center justify-center bg-surface-800 rounded-lg border border-surface-600">
@@ -863,10 +863,10 @@ export default function TestGeneratorTab() {
                   />
                 </Suspense>
               </div>
-              <div className="flex flex-col gap-3 min-h-[320px] lg:min-h-0 lg:flex-1">
+              <div className="flex flex-col gap-3 min-h-[320px] lg:min-h-0 lg:flex-1 lg:overflow-hidden">
                 {showExecutionPanel ? (
                   <>
-                    <div className="h-[min(380px,55vh)] lg:h-auto lg:flex-1 lg:min-h-0">
+                    <div className="h-[min(380px,55vh)] lg:h-auto lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                       <ExecutionConsole
                         output={output}
                         result={runResult}
