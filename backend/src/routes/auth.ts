@@ -1,12 +1,39 @@
 import { Router, Request, Response, NextFunction } from "express";
+import bcrypt from "bcryptjs";
 import passport from "../passportConfig.js";
-import { getOrCreateGuestUser, getUserSettings, upsertUserSettings } from "../db.js";
+import { getOrCreateGuestUser, getOrCreateAdminUser, getUserSettings, upsertUserSettings } from "../db.js";
 import type { DbUser } from "../db.js";
 import { ensureDbUser } from "../middleware/ensureDbUser.js";
 
 const router = Router();
 
 const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:5173";
+
+// ─── Admin login rate limiting (per-IP, in-memory) ───────────────────────────
+// Best-effort brute-force guard — resets on cold start, but Fluid Compute
+// reuses warm instances so it still throttles sustained attack traffic.
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_MAX_ATTEMPTS = 8;
+const adminLoginAttempts = new Map<string, { count: number; firstAttempt: number }>();
+
+function isAdminLoginRateLimited(key: string): boolean {
+  const entry = adminLoginAttempts.get(key);
+  if (!entry) return false;
+  if (Date.now() - entry.firstAttempt > ADMIN_LOGIN_WINDOW_MS) {
+    adminLoginAttempts.delete(key);
+    return false;
+  }
+  return entry.count >= ADMIN_LOGIN_MAX_ATTEMPTS;
+}
+
+function recordFailedAdminLogin(key: string): void {
+  const entry = adminLoginAttempts.get(key);
+  if (!entry || Date.now() - entry.firstAttempt > ADMIN_LOGIN_WINDOW_MS) {
+    adminLoginAttempts.set(key, { count: 1, firstAttempt: Date.now() });
+  } else {
+    entry.count += 1;
+  }
+}
 
 function getUser(req: Request): DbUser | null {
   return (req.user as DbUser) ?? null;
@@ -39,6 +66,51 @@ router.post("/api/auth/mock-login", async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("[mock-login]", err);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// ─── Owner / admin login (email + password against env-configured hash) ──────
+// Separate from the shared guest account — grants a private, fully-editable
+// settings record. Requires ADMIN_EMAIL + ADMIN_PASSWORD_HASH to be set.
+
+router.post("/api/auth/admin-login", async (req: Request, res: Response) => {
+  const ip = req.ip ?? "unknown";
+  if (isAdminLoginRateLimited(ip)) {
+    return res.status(429).json({ error: "Too many attempts. Please try again later." });
+  }
+
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
+  if (!adminEmail || !adminPasswordHash) {
+    return res.status(503).json({ error: "Admin login is not configured on this server." });
+  }
+
+  const { email, password } = req.body as { email?: string; password?: string };
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required." });
+  }
+
+  const emailMatches = email.trim().toLowerCase() === adminEmail.trim().toLowerCase();
+  const passwordMatches = await bcrypt.compare(password, adminPasswordHash);
+
+  if (!emailMatches || !passwordMatches) {
+    recordFailedAdminLogin(ip);
+    return res.status(401).json({ error: "Invalid email or password." });
+  }
+  adminLoginAttempts.delete(ip);
+
+  try {
+    const adminUser = await getOrCreateAdminUser(adminEmail, process.env.ADMIN_NAME?.trim() || "Admin");
+    req.login(adminUser, (err) => {
+      if (err) return res.status(500).json({ error: "Login failed" });
+      res.json({
+        success: true,
+        user: { id: adminUser.id, name: adminUser.name, email: adminUser.email },
+      });
+    });
+  } catch (err) {
+    console.error("[admin-login]", err);
     res.status(500).json({ error: "Login failed" });
   }
 });

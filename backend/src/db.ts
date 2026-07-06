@@ -138,6 +138,18 @@ export async function getOrCreateGuestUser(): Promise<DbUser> {
   }
 }
 
+/** Owner/admin account — kept separate from the shared guest row so the resume
+ * owner gets a private, fully-editable settings record. Keyed by a fixed
+ * githubId (like the guest) rather than a schema change. */
+export async function getOrCreateAdminUser(email: string, name: string): Promise<DbUser> {
+  return upsertGithubUser({
+    githubId: "admin_owner",
+    email,
+    name,
+    avatarUrl: null,
+  });
+}
+
 /**
  * Ensure the session user exists in Supabase before any FK-backed write.
  * Fixes stale "local-dev-guest" sessions created while the DB was offline.

@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
-import { BrainCircuit, Loader2, Sparkles, ShieldCheck, LogIn } from "lucide-react";
+import { BrainCircuit, Loader2, Sparkles, ShieldCheck, LogIn, KeyRound, ArrowLeft } from "lucide-react";
 
 interface LoginPageProps {
   onLoginSuccess: () => void;
 }
 
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
+  const [mode, setMode] = useState<"guest" | "admin">("guest");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
 
   const params = new URLSearchParams(window.location.search);
   const urlError = params.get("error");
@@ -39,6 +45,31 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     }
   };
 
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminLoading(true);
+    setAdminError(null);
+
+    try {
+      const res = await fetch("/api/auth/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Server returned ${res.status}`);
+
+      window.history.replaceState({}, "", "/");
+      onLoginSuccess();
+    } catch (e) {
+      setAdminError(e instanceof Error ? e.message : "Sign-in failed. Please try again.");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-surface-900 flex flex-col items-center justify-center p-4">
       {/* Background glow */}
@@ -63,52 +94,135 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
         {/* Card */}
         <div className="bg-surface-800 border border-surface-600 rounded-2xl p-6 sm:p-8 shadow-2xl">
-          <h2 className="text-lg font-semibold text-white text-center mb-1">
-            Welcome to your workspace
-          </h2>
-          <p className="text-sm text-slate-400 text-center mb-6">
-            This is a live portfolio demo — enter as a shared guest to generate, run, and analyse tests with AI.
-          </p>
+          {mode === "guest" ? (
+            <>
+              <h2 className="text-lg font-semibold text-white text-center mb-1">
+                Welcome to your workspace
+              </h2>
+              <p className="text-sm text-slate-400 text-center mb-6">
+                This is an interactive demo environment. Enter as a guest to instantly generate, execute, and analyze automated tests with AI.
+              </p>
 
-          {/* URL-level error */}
-          {urlError && !error && (
-            <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 mb-5">
-              <span>Sign-in failed. Please try again.</span>
-            </div>
+              {/* URL-level error */}
+              {urlError && !error && (
+                <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 mb-5">
+                  <span>Sign-in failed. Please try again.</span>
+                </div>
+              )}
+
+              {/* Runtime error */}
+              {error && (
+                <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 mb-5">
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void handleLogin()}
+                disabled={loading}
+                className="flex items-center justify-center gap-3 w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 border border-sky-500 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+              >
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" aria-hidden />
+                ) : (
+                  <LogIn className="w-5 h-5" aria-hidden />
+                )}
+                {loading ? "Entering workspace…" : "Continue as Guest"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setMode("admin"); setError(null); }}
+                className="flex items-center justify-center gap-1.5 w-full mt-3 py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-lg"
+              >
+                <KeyRound className="w-3.5 h-3.5" aria-hidden />
+                Owner Access — Sign in as Admin
+              </button>
+
+              {/* Trust indicators */}
+              <div className="flex items-center justify-center gap-4 mt-6 pt-5 border-t border-surface-600">
+                <span className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" aria-hidden />
+                  Session encrypted
+                </span>
+                <span className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                  <Sparkles className="w-3.5 h-3.5 text-sky-600" aria-hidden />
+                  AI-powered
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 className="text-lg font-semibold text-white text-center mb-1">
+                Owner Access
+              </h2>
+              <p className="text-sm text-slate-400 text-center mb-6">
+                Sign in with your admin credentials to manage integrations and settings.
+              </p>
+
+              {adminError && (
+                <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 mb-5">
+                  <span>{adminError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAdminLogin} className="space-y-4">
+                <div>
+                  <label htmlFor="admin-email" className="block text-xs font-medium text-slate-400 mb-1.5">
+                    Email
+                  </label>
+                  <input
+                    id="admin-email"
+                    type="email"
+                    required
+                    autoComplete="username"
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="admin-password" className="block text-xs font-medium text-slate-400 mb-1.5">
+                    Password
+                  </label>
+                  <input
+                    id="admin-password"
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={adminLoading}
+                  className="flex items-center justify-center gap-3 w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 border border-sky-500 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                >
+                  {adminLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" aria-hidden />
+                  ) : (
+                    <KeyRound className="w-5 h-5" aria-hidden />
+                  )}
+                  {adminLoading ? "Signing in…" : "Sign in as Admin"}
+                </button>
+              </form>
+
+              <button
+                type="button"
+                onClick={() => { setMode("guest"); setAdminError(null); }}
+                className="flex items-center justify-center gap-1.5 w-full mt-4 pt-4 border-t border-surface-600 py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-lg"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" aria-hidden />
+                Back to Guest Demo
+              </button>
+            </>
           )}
-
-          {/* Runtime error */}
-          {error && (
-            <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 mb-5">
-              <span>{error}</span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() => void handleLogin()}
-            disabled={loading}
-            className="flex items-center justify-center gap-3 w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 border border-sky-500 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-          >
-            {loading ? (
-              <Loader2 className="w-5 h-5 animate-spin" aria-hidden />
-            ) : (
-              <LogIn className="w-5 h-5" aria-hidden />
-            )}
-            {loading ? "Entering workspace…" : "Continue as Guest"}
-          </button>
-
-          {/* Trust indicators */}
-          <div className="flex items-center justify-center gap-4 mt-6 pt-5 border-t border-surface-600">
-            <span className="flex items-center gap-1.5 text-[11px] text-slate-600">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" aria-hidden />
-              Session encrypted
-            </span>
-            <span className="flex items-center gap-1.5 text-[11px] text-slate-600">
-              <Sparkles className="w-3.5 h-3.5 text-sky-600" aria-hidden />
-              AI-powered
-            </span>
-          </div>
         </div>
 
         <p className="text-xs text-slate-600 text-center mt-6">

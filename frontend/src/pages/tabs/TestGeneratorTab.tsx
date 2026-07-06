@@ -49,6 +49,11 @@ function FeatureNameInput({
       </label>
       <div className="flex flex-col sm:flex-row gap-2">
         <input
+          id="feature-name"
+          name="feature-name"
+          autoComplete="off"
+          data-lpignore="true"
+          data-1p-ignore="true"
           value={value}
           onChange={(e) => { onChange(e.target.value); }}
           onFocus={() => setShowSuggestions(true)}
