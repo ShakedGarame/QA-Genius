@@ -107,6 +107,7 @@ model LogAnalysis {
   id           String   @id @default(uuid())
   userId       String   @map("user_id")
   source       String
+  featureName  String?  @map("feature_name")
   rawLogs      String   @map("raw_logs") @db.Text
   rootCause    String   @map("root_cause") @db.Text
   explanation  String   @db.Text

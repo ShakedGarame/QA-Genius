@@ -166,9 +166,14 @@ function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-1 sm:gap-3 mt-2">
               <span className="flex items-center gap-1 text-xs text-slate-500">
                 <CalendarDays className="w-3 h-3 flex-shrink-0" />
-                {formatRelativeDate(meta.createdAt)}
+                {meta.lastRunAt ? `Last run ${formatRelativeDate(meta.lastRunAt)}` : formatRelativeDate(meta.createdAt)}
               </span>
-              <span className="hidden sm:inline text-slate-600 text-[10px]">{formatAbsoluteDate(meta.createdAt)}</span>
+              <span className="hidden sm:inline text-slate-600 text-[10px]">
+                {formatAbsoluteDate(meta.lastRunAt ?? meta.createdAt)}
+              </span>
+              {meta.lastRunAt && (
+                <span className="text-slate-600 text-[10px]">Created {formatRelativeDate(meta.createdAt)}</span>
+              )}
               <span className="flex items-center gap-1 text-xs text-slate-500">
                 <Layers className="w-3 h-3 flex-shrink-0" />
                 {tests.length} file{tests.length !== 1 ? "s" : ""}
@@ -256,6 +261,21 @@ function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false
   );
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  playwright: "Playwright",
+  "playwright-failure": "Playwright",
+  coralogix: "Coralogix",
+  nodejs: "Node.js",
+  jest: "Jest / Vitest",
+  docker: "Docker",
+  custom: "Custom",
+  unknown: "Unknown",
+};
+
+function formatSourceLabel(source: string): string {
+  return SOURCE_LABELS[source.toLowerCase()] ?? source.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "text-red-300 bg-red-500/15 border-red-500/30",
   high: "text-orange-300 bg-orange-500/15 border-orange-500/30",
@@ -283,12 +303,17 @@ function LogAnalysisCard({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-base font-bold text-slate-100 capitalize">{analysis.source.replace(/-/g, " ")}</h3>
+            <h3 className="text-base font-bold text-slate-100">
+              {analysis.feature_name?.trim() || "Unnamed Test Automation Run"}
+            </h3>
             <span className={clsx("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border", severityClass)}>
               {analysis.severity}
             </span>
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-surface-700 text-slate-400 border border-surface-600">
               {analysis.category}
+            </span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-violet-500/15 text-violet-400 border border-violet-500/20">
+              {formatSourceLabel(analysis.source)}
             </span>
           </div>
           <p className="text-sm text-slate-300 mt-1 line-clamp-2">{analysis.root_cause}</p>
@@ -396,6 +421,7 @@ export default function HistoryTab() {
   const filteredLogs = analyses.filter(
     (a) =>
       !search.trim() ||
+      a.feature_name?.toLowerCase().includes(search.toLowerCase()) ||
       a.source.toLowerCase().includes(search.toLowerCase()) ||
       a.root_cause.toLowerCase().includes(search.toLowerCase()) ||
       a.category.toLowerCase().includes(search.toLowerCase())

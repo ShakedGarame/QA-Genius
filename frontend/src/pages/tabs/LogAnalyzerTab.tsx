@@ -29,6 +29,7 @@ import {
   PanelBody,
   EmptyState,
   SectionLabel,
+  FormInput,
   FormTextarea,
   ErrorBanner,
 } from "../../components/ui/layout";
@@ -88,6 +89,7 @@ export default function LogAnalyzerTab() {
   const [testCode, setTestCode] = useState("");
   const [featureSlug, setFeatureSlug] = useState<string | undefined>();
   const [fileName, setFileName] = useState<string | undefined>();
+  const [runName, setRunName] = useState("");
   const [showTestCodeField, setShowTestCodeField] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -128,9 +130,10 @@ export default function LogAnalyzerTab() {
     result !== null &&
     (isPlaywright || HEAL_ELIGIBLE_CATEGORIES.includes(result.category ?? ""));
 
-  const handleAnalyze = useCallback(async (logsOverride?: string, sourceOverride?: LogSource) => {
+  const handleAnalyze = useCallback(async (logsOverride?: string, sourceOverride?: LogSource, featureNameOverride?: string) => {
     const logsToAnalyze = logsOverride ?? rawLogs;
     const sourceToUse = sourceOverride ?? source;
+    const featureNameToUse = featureNameOverride ?? runName;
     if (!logsToAnalyze.trim()) return;
     setIsAnalyzing(true);
     setResult(null);
@@ -141,7 +144,11 @@ export default function LogAnalyzerTab() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...buildOpenAIKeyHeaders() },
         credentials: "include",
-        body: JSON.stringify({ rawLogs: logsToAnalyze, source: sourceToUse }),
+        body: JSON.stringify({
+          rawLogs: logsToAnalyze,
+          source: sourceToUse,
+          featureName: featureNameToUse.trim() || undefined,
+        }),
       });
 
       if (!res.body) throw new Error("No response body");
@@ -185,7 +192,7 @@ export default function LogAnalyzerTab() {
       setIsAnalyzing(false);
       setStatusMessage("");
     }
-  }, [rawLogs, source]);
+  }, [rawLogs, source, runName]);
 
   const applyPopulate = useCallback(
     (detail: AnalyzerRoutePayload) => {
@@ -203,9 +210,10 @@ export default function LogAnalyzerTab() {
       }
       if (detail.featureSlug) setFeatureSlug(detail.featureSlug);
       if (detail.fileName) setFileName(detail.fileName);
+      setRunName(detail.featureName?.trim() || "");
 
       if (detail.autoTrigger) {
-        setTimeout(() => handleAnalyze(detail.logs, incomingSource), 100);
+        setTimeout(() => handleAnalyze(detail.logs, incomingSource, detail.featureName), 100);
       }
     },
     [handleAnalyze]
@@ -235,6 +243,7 @@ export default function LogAnalyzerTab() {
     setTestCode("");
     setFeatureSlug(undefined);
     setFileName(undefined);
+    setRunName("");
     setResult(null);
     setError(null);
     setMobileResultsView(false);
@@ -335,6 +344,17 @@ export default function LogAnalyzerTab() {
         </PanelHeader>
 
         <PanelBody className="flex flex-col gap-4 p-5">
+          {/* Test / feature name (optional) — used as the primary title in History */}
+          <div>
+            <SectionLabel>Test / Feature Name (optional)</SectionLabel>
+            <FormInput
+              value={runName}
+              onChange={(e) => setRunName(e.target.value)}
+              placeholder="e.g. Login Flow, Checkout API"
+              className="text-sm w-full"
+            />
+          </div>
+
           {/* Source dropdown */}
           <div>
             <SectionLabel>Log Source</SectionLabel>

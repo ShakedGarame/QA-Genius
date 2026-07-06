@@ -21,6 +21,7 @@ export interface AnalyzerRoutePayload {
   testCode?: string;
   featureSlug?: string;
   fileName?: string;
+  featureName?: string;
 }
 
 /** Payload for loading a saved repository test into Test Generator and optionally auto-running. */
@@ -508,7 +509,7 @@ export function readPendingAnalyzerPayload(): AnalyzerRoutePayload | null {
 export function routeFailureLogsToAnalyzer(
   logs: string,
   source = "playwright",
-  context?: { testCode?: string; featureSlug?: string; fileName?: string }
+  context?: { testCode?: string; featureSlug?: string; fileName?: string; featureName?: string }
 ): void {
   const trimmed = logs.trim();
   if (!trimmed) return;

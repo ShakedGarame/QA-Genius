@@ -102,7 +102,7 @@ export function useTestRunner() {
     }
   }, []);
 
-  const analyzeFailure = useCallback(async (testCode: string, errorOutput: string) => {
+  const analyzeFailure = useCallback(async (testCode: string, errorOutput: string, featureName?: string) => {
     setIsAnalyzing(true);
     setMcpSteps([]);
     setAnalysis(null);
@@ -112,7 +112,7 @@ export function useTestRunner() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...buildOpenAIKeyHeaders() },
         credentials: "include",
-        body: JSON.stringify({ testCode, errorOutput }),
+        body: JSON.stringify({ testCode, errorOutput, featureName }),
       });
 
       if (!res.body) throw new Error("No response body");

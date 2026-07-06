@@ -36,6 +36,7 @@ export interface DbLogAnalysis {
   id: string;
   user_id: string;
   source: string;
+  feature_name: string | null;
   raw_logs: string;
   root_cause: string;
   explanation: string;
@@ -363,62 +364,79 @@ export async function listFeatureGroups(userId: string): Promise<FeatureGroup[]>
       include: { tests: { orderBy: { fileName: "asc" } } },
       orderBy: { updatedAt: "desc" },
     }),
-    getLatestRunStatusBySlug(userId),
-    getLatestRunStatusByFeatureName(userId),
+    getLatestRunBySlug(userId),
+    getLatestRunByFeatureName(userId),
   ]);
 
-  return features.map((feature) => ({
-    meta: {
-      featureName: feature.featureName,
-      slug: feature.slug,
-      inputType: feature.inputType as InputType,
-      createdAt: feature.createdAt.toISOString(),
-      updatedAt: feature.updatedAt.toISOString(),
-      description: feature.description ?? undefined,
-      prdText: feature.prdText ?? undefined,
-      latestRunStatus:
-        latestBySlug.get(feature.slug) ??
-        latestByName.get(feature.featureName) ??
-        null,
-    },
-    tests: feature.tests.map((test) =>
-      buildTestFileInfo(
-        { slug: feature.slug, featureName: feature.featureName },
-        test
-      )
-    ),
-  }));
+  const groups = features.map((feature) => {
+    const latest = latestBySlug.get(feature.slug) ?? latestByName.get(feature.featureName) ?? null;
+
+    return {
+      meta: {
+        featureName: feature.featureName,
+        slug: feature.slug,
+        inputType: feature.inputType as InputType,
+        createdAt: feature.createdAt.toISOString(),
+        updatedAt: feature.updatedAt.toISOString(),
+        description: feature.description ?? undefined,
+        prdText: feature.prdText ?? undefined,
+        latestRunStatus: latest?.status ?? null,
+        lastRunAt: latest?.runAt ?? null,
+      },
+      tests: feature.tests.map((test) =>
+        buildTestFileInfo(
+          { slug: feature.slug, featureName: feature.featureName },
+          test
+        )
+      ),
+    };
+  });
+
+  // Surface features with the most recent activity (last run, falling back to
+  // creation time) first, instead of the stale Feature.updatedAt column.
+  groups.sort((a, b) => {
+    const aTime = new Date(a.meta.lastRunAt ?? a.meta.createdAt).getTime();
+    const bTime = new Date(b.meta.lastRunAt ?? b.meta.createdAt).getTime();
+    return bTime - aTime;
+  });
+
+  return groups;
 }
 
-/** Most recent execution status per feature slug (from relative_path prefix). */
-async function getLatestRunStatusBySlug(userId: string): Promise<Map<string, TestRunStatus>> {
+interface LatestRun {
+  status: TestRunStatus;
+  runAt: string;
+}
+
+/** Most recent execution (status + timestamp) per feature slug (from relative_path prefix). */
+async function getLatestRunBySlug(userId: string): Promise<Map<string, LatestRun>> {
   const runs = await prisma.testRun.findMany({
     where: { userId, relativePath: { not: null } },
     orderBy: { createdAt: "desc" },
-    select: { status: true, relativePath: true },
+    select: { status: true, relativePath: true, createdAt: true },
   });
 
-  const map = new Map<string, TestRunStatus>();
+  const map = new Map<string, LatestRun>();
   for (const run of runs) {
     const slug = run.relativePath?.split("/")[0];
     if (!slug || map.has(slug)) continue;
-    map.set(slug, run.status as TestRunStatus);
+    map.set(slug, { status: run.status as TestRunStatus, runAt: run.createdAt.toISOString() });
   }
   return map;
 }
 
 /** Fallback match by display feature name when relative_path is missing. */
-async function getLatestRunStatusByFeatureName(userId: string): Promise<Map<string, TestRunStatus>> {
+async function getLatestRunByFeatureName(userId: string): Promise<Map<string, LatestRun>> {
   const runs = await prisma.testRun.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
-    select: { status: true, featureName: true },
+    select: { status: true, featureName: true, createdAt: true },
   });
 
-  const map = new Map<string, TestRunStatus>();
+  const map = new Map<string, LatestRun>();
   for (const run of runs) {
     if (!run.featureName || map.has(run.featureName)) continue;
-    map.set(run.featureName, run.status as TestRunStatus);
+    map.set(run.featureName, { status: run.status as TestRunStatus, runAt: run.createdAt.toISOString() });
   }
   return map;
 }
@@ -480,6 +498,7 @@ export async function saveLogAnalysis(
   userId: string,
   data: {
     source: string;
+    featureName?: string | null;
     rawLogs: string;
     rootCause: string;
     explanation: string;
@@ -493,6 +512,7 @@ export async function saveLogAnalysis(
     data: {
       userId,
       source: data.source,
+      featureName: data.featureName || null,
       rawLogs: data.rawLogs,
       rootCause: data.rootCause,
       explanation: data.explanation,
@@ -507,6 +527,7 @@ export async function saveLogAnalysis(
     id: row.id,
     user_id: row.userId,
     source: row.source,
+    feature_name: row.featureName,
     raw_logs: row.rawLogs,
     root_cause: row.rootCause,
     explanation: row.explanation,
@@ -528,6 +549,7 @@ export async function listLogAnalyses(userId: string): Promise<DbLogAnalysis[]> 
     id: row.id,
     user_id: row.userId,
     source: row.source,
+    feature_name: row.featureName,
     raw_logs: row.rawLogs,
     root_cause: row.rootCause,
     explanation: row.explanation,
@@ -550,6 +572,7 @@ export async function getLogAnalysisById(
     id: row.id,
     user_id: row.userId,
     source: row.source,
+    feature_name: row.featureName,
     raw_logs: row.rawLogs,
     root_cause: row.rootCause,
     explanation: row.explanation,

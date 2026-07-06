@@ -141,6 +141,8 @@ export interface FeatureMeta {
   prdText?: string;
   /** Latest test execution status for this feature, if any */
   latestRunStatus?: TestRunStatus | null;
+  /** Timestamp of the most recent test run for this feature, if any */
+  lastRunAt?: string | null;
 }
 
 export interface FeatureGroup {
@@ -152,6 +154,7 @@ export interface LogAnalysisRecord {
   id: string;
   user_id: string;
   source: string;
+  feature_name: string | null;
   raw_logs: string;
   root_cause: string;
   explanation: string;

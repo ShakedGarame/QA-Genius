@@ -562,7 +562,7 @@ export default function TestGeneratorTab() {
   const handleAnalyze = async () => {
     const code = editedCode || genResult?.code || "";
     const err = runResult?.errorDetails ?? runResult?.rawLogs ?? output;
-    await analyzeFailure(code, err);
+    await analyzeFailure(code, err, featureName.trim() || undefined);
   };
 
   const handleAnalyzeWithGitHubLogs = () => {
@@ -571,6 +571,7 @@ export default function TestGeneratorTab() {
       testCode: editedCode,
       featureSlug: featureSlug ?? undefined,
       fileName: savedAs ?? undefined,
+      featureName: featureName.trim() || undefined,
     });
   };
 

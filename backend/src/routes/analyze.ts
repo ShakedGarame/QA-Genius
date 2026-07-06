@@ -120,7 +120,7 @@ router.post("/analyze-failure", async (req: Request, res: Response) => {
   const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings);
   const llmOptions = { openaiKey: extractOpenAIKeyFromRequest(req, userSettings) };
 
-  const { testCode, errorOutput } = req.body as AnalyzeFailureRequest;
+  const { testCode, errorOutput, featureName } = req.body as AnalyzeFailureRequest;
 
   if (!errorOutput || typeof errorOutput !== "string") {
     return res.status(400).json({ error: "errorOutput is required" });
@@ -203,6 +203,7 @@ router.post("/analyze-failure", async (req: Request, res: Response) => {
 
     const saved = await saveLogAnalysis(userId, {
       source: "playwright-failure",
+      featureName,
       rawLogs: errorOutput,
       rootCause: result.rootCause,
       explanation: result.explanation,
@@ -226,6 +227,7 @@ router.post("/analyze-failure", async (req: Request, res: Response) => {
 interface AnalyzeLogsRequest {
   rawLogs: string;
   source: string;
+  featureName?: string;
 }
 
 router.post("/analyze-logs", async (req: Request, res: Response) => {
@@ -234,7 +236,7 @@ router.post("/analyze-logs", async (req: Request, res: Response) => {
   const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings);
   const llmOptions = { openaiKey: extractOpenAIKeyFromRequest(req, userSettings) };
 
-  const { rawLogs, source } = req.body as AnalyzeLogsRequest;
+  const { rawLogs, source, featureName } = req.body as AnalyzeLogsRequest;
 
   if (!rawLogs || typeof rawLogs !== "string" || rawLogs.trim().length < 5) {
     return res.status(400).json({ error: "rawLogs is required" });
@@ -272,6 +274,7 @@ router.post("/analyze-logs", async (req: Request, res: Response) => {
 
     const saved = await saveLogAnalysis(userId, {
       source: source ?? "unknown",
+      featureName,
       rawLogs: rawLogs.trim(),
       rootCause: result.rootCause,
       explanation: result.explanation,

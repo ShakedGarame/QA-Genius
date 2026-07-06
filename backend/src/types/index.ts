@@ -68,6 +68,7 @@ export interface AnalyzeFailureRequest {
   testCode: string;
   errorOutput: string;
   testId: string;
+  featureName?: string;
 }
 
 export interface McpLog {
@@ -98,6 +99,8 @@ export interface FeatureMeta {
   description?: string;
   prdText?: string;         // truncated snippet for display
   latestRunStatus?: "RUNNING" | "PASSED" | "FAILED" | null;
+  /** Timestamp of the most recent test run for this feature, if any. */
+  lastRunAt?: string | null;
 }
 
 export interface TestFileInfo {
