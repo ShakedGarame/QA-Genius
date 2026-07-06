@@ -118,5 +118,20 @@ model LogAnalysis {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("log_analyses")
+}
+
+/// Owned by connect-pg-simple (the express-session store in app.ts), not by
+/// application code. @@ignore keeps it out of the generated Prisma Client
+/// while still declaring it to Prisma Migrate/db push, so schema syncs
+/// recognize it as expected and stop trying to drop it.
+model Session {
+  sid    String   @id(map: "session_pkey") @db.VarChar
+  sess   Json     @db.Json
+  expire DateTime @db.Timestamp(6)
+
+  @@index([expire], map: "IDX_session_expire")
+  @@map("session")
+  @@ignore
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import {
   BrainCircuit,
   Sparkles,
@@ -14,13 +14,25 @@ import {
   ChevronDown,
 } from "lucide-react";
 import clsx from "clsx";
-import TestGeneratorTab from "../../pages/tabs/TestGeneratorTab";
-import TestRepositoryTab from "../../pages/tabs/TestRepositoryTab";
-import LogAnalyzerTab from "../../pages/tabs/LogAnalyzerTab";
-import HistoryTab from "../../pages/tabs/HistoryTab";
-import DashboardTab from "../../pages/tabs/DashboardTab";
-import SettingsTab from "../../pages/tabs/SettingsTab";
 import type { AuthUser } from "../../hooks/useAuth";
+
+// Lazy-loaded so each tab's code (and, for Test Generator, Monaco) only
+// downloads once the user actually visits that tab, instead of all six
+// tabs' bundles + data fetches firing together on first load/login.
+const TestGeneratorTab = lazy(() => import("../../pages/tabs/TestGeneratorTab"));
+const TestRepositoryTab = lazy(() => import("../../pages/tabs/TestRepositoryTab"));
+const LogAnalyzerTab = lazy(() => import("../../pages/tabs/LogAnalyzerTab"));
+const HistoryTab = lazy(() => import("../../pages/tabs/HistoryTab"));
+const DashboardTab = lazy(() => import("../../pages/tabs/DashboardTab"));
+const SettingsTab = lazy(() => import("../../pages/tabs/SettingsTab"));
+
+function TabLoadingFallback() {
+  return (
+    <div className="flex-1 flex items-center justify-center py-16">
+      <div className="w-8 h-8 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+    </div>
+  );
+}
 
 export type TabId = "generator" | "repository" | "analyzer" | "history" | "dashboard" | "settings";
 
@@ -254,9 +266,17 @@ function MobileNavDrawer({
 export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>("generator");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Once a tab has been visited it stays mounted (just hidden) so switching
+  // back preserves its state/scroll position — but it's never mounted, and
+  // its data fetches never fire, until the user actually opens it.
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set(["generator"]));
 
   const activeItem = NAV_ITEMS.find((t) => t.id === activeTab) ?? NAV_ITEMS[0];
   const ActiveIcon = activeItem.icon;
+
+  useEffect(() => {
+    setVisitedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
 
   useEffect(() => {
     const onNavigate = (event: Event) => {
@@ -383,24 +403,48 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
         </header>
 
         <main id="main-content" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-y-auto lg:overflow-hidden" tabIndex={-1}>
-          <div className={activeTab === "generator" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
-            <TestGeneratorTab />
-          </div>
-          <div className={activeTab === "repository" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
-            <TestRepositoryTab />
-          </div>
-          <div className={activeTab === "analyzer" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
-            <LogAnalyzerTab />
-          </div>
-          <div className={activeTab === "history" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
-            <HistoryTab />
-          </div>
-          <div className={activeTab === "dashboard" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
-            <DashboardTab />
-          </div>
-          <div className={activeTab === "settings" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
-            <SettingsTab />
-          </div>
+          {visitedTabs.has("generator") && (
+            <div className={activeTab === "generator" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TestGeneratorTab />
+              </Suspense>
+            </div>
+          )}
+          {visitedTabs.has("repository") && (
+            <div className={activeTab === "repository" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TestRepositoryTab />
+              </Suspense>
+            </div>
+          )}
+          {visitedTabs.has("analyzer") && (
+            <div className={activeTab === "analyzer" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
+              <Suspense fallback={<TabLoadingFallback />}>
+                <LogAnalyzerTab />
+              </Suspense>
+            </div>
+          )}
+          {visitedTabs.has("history") && (
+            <div className={activeTab === "history" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
+              <Suspense fallback={<TabLoadingFallback />}>
+                <HistoryTab />
+              </Suspense>
+            </div>
+          )}
+          {visitedTabs.has("dashboard") && (
+            <div className={activeTab === "dashboard" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
+              <Suspense fallback={<TabLoadingFallback />}>
+                <DashboardTab />
+              </Suspense>
+            </div>
+          )}
+          {visitedTabs.has("settings") && (
+            <div className={activeTab === "settings" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
+              <Suspense fallback={<TabLoadingFallback />}>
+                <SettingsTab />
+              </Suspense>
+            </div>
+          )}
         </main>
       </div>
     </div>

@@ -1,14 +1,22 @@
 import { Request, Response, NextFunction } from "express";
-import { resolveDbUser } from "../db.js";
+import { resolveDbUser, buildLocalDevGuest } from "../db.js";
 import type { DbUser } from "../db.js";
 
 /**
  * Reconcile the session user with Supabase before protected API handlers run.
  * Prevents FK errors when an offline guest id was stored in the session.
+ *
+ * passport.session() already ran deserializeUser earlier in this same request,
+ * which re-fetched the user from the DB (req.isAuthenticated()/requireAuth would
+ * have already rejected the request if that lookup had failed) — except for the
+ * local-dev offline guest, which deserializeUser intentionally returns without a
+ * DB round-trip. So only that guest id actually needs reconciling here; every
+ * other session user has already been freshly validated this request.
  */
 export function ensureDbUser(req: Request, res: Response, next: NextFunction) {
   const sessionUser = req.user as DbUser | undefined;
   if (!sessionUser?.id) return next();
+  if (sessionUser.id !== buildLocalDevGuest().id) return next();
 
   void resolveDbUser(sessionUser)
     .then((dbUser) => {

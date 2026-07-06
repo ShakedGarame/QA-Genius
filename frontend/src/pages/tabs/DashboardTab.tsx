@@ -140,13 +140,15 @@ export default function DashboardTab() {
     window.addEventListener("qa-genius:test-runs-changed", onChanged);
     const onFocus = () => { void load(true); };
     window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", () => {
+    const onVisibility = () => {
       if (document.visibilityState === "visible") void load(true);
-    });
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     pollRef.current = setInterval(() => { void load(true); }, 30_000);
     return () => {
       window.removeEventListener("qa-genius:test-runs-changed", onChanged);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [load]);

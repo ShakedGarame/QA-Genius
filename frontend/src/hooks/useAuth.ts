@@ -28,10 +28,15 @@ export function useAuth() {
 
   const fetchMe = useCallback(async () => {
     try {
-      const health = await fetch("/health");
+      // Fired in parallel, not sequentially — /api/me doesn't depend on /health,
+      // so awaiting them one after another was adding a full extra round-trip
+      // to every boot.
+      const [health, res] = await Promise.all([
+        fetch("/health"),
+        fetch("/api/me", { credentials: "include" }),
+      ]);
       if (!health.ok) throw new Error("Backend unavailable");
 
-      const res = await fetch("/api/me", { credentials: "include" });
       if (res.status === 401) {
         if (isLocalDev) {
           // Backend auto-guest should handle this — retry briefly

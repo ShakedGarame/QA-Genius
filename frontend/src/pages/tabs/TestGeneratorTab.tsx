@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useDropzone } from "react-dropzone";
 import {
   Play, Loader2, Sparkles, FileCode2, AlertCircle,
@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import StoryPanel from "../../components/qa-genius/StoryPanel";
-import TestEditor from "../../components/qa-genius/TestEditor";
 import ExecutionConsole from "../../components/qa-genius/ExecutionConsole";
 import ArtifactsGallery from "../../components/qa-genius/ArtifactsGallery";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
@@ -19,6 +18,11 @@ import SelfHealModal from "../../components/qa-genius/SelfHealModal";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
 import { MOCK_CODE_MAP } from "../../data/mockData";
 import { SidebarPanel, PanelBody, EmptyState } from "../../components/ui/layout";
+
+// Monaco is the single heaviest dependency in the app and is only needed once a
+// test has actually been generated — lazy-load it so it never ships in the
+// initial bundle for users who haven't reached this point yet.
+const TestEditor = lazy(() => import("../../components/qa-genius/TestEditor"));
 
 // ─── Feature Name Input ───────────────────────────────────────────────────────
 
@@ -845,11 +849,19 @@ export default function TestGeneratorTab() {
 
             <div className="flex flex-col xl:grid xl:grid-cols-2 gap-4 pb-6">
               <div className="h-[min(360px,50vh)] lg:h-auto lg:min-h-0 xl:min-h-[280px]">
-                <TestEditor
-                  code={editedCode}
-                  onChange={setEditedCode}
-                  fileName={savedAs ?? "generated.spec.ts"}
-                />
+                <Suspense
+                  fallback={
+                    <div className="w-full h-full flex items-center justify-center bg-surface-800 rounded-lg border border-surface-600">
+                      <Loader2 className="w-6 h-6 text-slate-500 animate-spin" />
+                    </div>
+                  }
+                >
+                  <TestEditor
+                    code={editedCode}
+                    onChange={setEditedCode}
+                    fileName={savedAs ?? "generated.spec.ts"}
+                  />
+                </Suspense>
               </div>
               <div className="flex flex-col gap-3 min-h-[320px] lg:min-h-0 lg:flex-1">
                 {showExecutionPanel ? (

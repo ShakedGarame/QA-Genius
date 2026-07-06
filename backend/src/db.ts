@@ -196,22 +196,15 @@ export async function upsertGithubUser(profile: {
   name: string;
   avatarUrl: string | null;
 }): Promise<DbUser> {
-  const existing = await prisma.user.findUnique({ where: { githubId: profile.githubId } });
-  if (existing) {
-    const row = await prisma.user.update({
-      where: { id: existing.id },
-      data: {
-        name: profile.name,
-        avatarUrl: profile.avatarUrl,
-        email: profile.email ?? undefined,
-        lastLogin: new Date(),
-      },
-    });
-    return mapUser(row);
-  }
-
-  const row = await prisma.user.create({
-    data: {
+  const row = await prisma.user.upsert({
+    where: { githubId: profile.githubId },
+    update: {
+      name: profile.name,
+      avatarUrl: profile.avatarUrl,
+      email: profile.email ?? undefined,
+      lastLogin: new Date(),
+    },
+    create: {
       id: randomUUID(),
       githubId: profile.githubId,
       email: profile.email,
@@ -228,22 +221,15 @@ export async function upsertGoogleUser(profile: {
   name: string;
   avatarUrl: string | null;
 }): Promise<DbUser> {
-  const existing = await prisma.user.findUnique({ where: { googleId: profile.googleId } });
-  if (existing) {
-    const row = await prisma.user.update({
-      where: { id: existing.id },
-      data: {
-        name: profile.name,
-        avatarUrl: profile.avatarUrl,
-        email: profile.email ?? undefined,
-        lastLogin: new Date(),
-      },
-    });
-    return mapUser(row);
-  }
-
-  const row = await prisma.user.create({
-    data: {
+  const row = await prisma.user.upsert({
+    where: { googleId: profile.googleId },
+    update: {
+      name: profile.name,
+      avatarUrl: profile.avatarUrl,
+      email: profile.email ?? undefined,
+      lastLogin: new Date(),
+    },
+    create: {
       id: randomUUID(),
       googleId: profile.googleId,
       email: profile.email,
@@ -279,11 +265,9 @@ export async function upsertUserSettings(
     jiraApiToken?: string | null;
   }
 ): Promise<void> {
-  const existing = await prisma.userSettings.findUnique({ where: { userId } });
-
-  const pick = <T>(next: T | undefined, fallback: T | null | undefined): T | null | undefined =>
-    next !== undefined ? next : fallback;
-
+  // Prisma omits any field left `undefined` in `update` (leaves it unchanged),
+  // so passing the keys straight through has the same effect as the previous
+  // findUnique-then-fallback dance, without the extra read on every save.
   await prisma.userSettings.upsert({
     where: { userId },
     create: {
@@ -300,16 +284,16 @@ export async function upsertUserSettings(
       jiraApiToken: keys.jiraApiToken ?? null,
     },
     update: {
-      openaiApiKey: pick(keys.openai, existing?.openaiApiKey),
-      anthropicApiKey: pick(keys.anthropic, existing?.anthropicApiKey),
-      coralogixApiKey: pick(keys.coralogix, existing?.coralogixApiKey),
-      coralogixTeamName: pick(keys.coralogixTeamName, existing?.coralogixTeamName),
-      coralogixRegion: pick(keys.coralogixRegion, existing?.coralogixRegion),
-      testsOutputDir: pick(keys.testsOutputDir, existing?.testsOutputDir),
-      githubIssuesRepo: pick(keys.githubIssuesRepo, existing?.githubIssuesRepo),
-      jiraDomain: pick(keys.jiraDomain, existing?.jiraDomain),
-      jiraEmail: pick(keys.jiraEmail, existing?.jiraEmail),
-      jiraApiToken: pick(keys.jiraApiToken, existing?.jiraApiToken),
+      openaiApiKey: keys.openai,
+      anthropicApiKey: keys.anthropic,
+      coralogixApiKey: keys.coralogix,
+      coralogixTeamName: keys.coralogixTeamName,
+      coralogixRegion: keys.coralogixRegion,
+      testsOutputDir: keys.testsOutputDir,
+      githubIssuesRepo: keys.githubIssuesRepo,
+      jiraDomain: keys.jiraDomain,
+      jiraEmail: keys.jiraEmail,
+      jiraApiToken: keys.jiraApiToken,
     },
   });
 }

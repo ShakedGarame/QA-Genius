@@ -42,6 +42,24 @@ if (isProduction) {
 // Local dev: in-memory sessions (no Supabase dependency, survives db push).
 // Production: PostgreSQL via connect-pg-simple.
 
+const globalForSessionPool = globalThis as unknown as { sessionPool?: pg.Pool };
+
+/** Single shared pool for the session store, created once per process and
+ * reused (same globalThis-caching pattern as prisma.ts) rather than a fresh
+ * pool being instantiated on every module load. */
+function getSessionPool(): pg.Pool {
+  if (globalForSessionPool.sessionPool) return globalForSessionPool.sessionPool;
+  const pool = new pg.Pool({
+    // DATABASE_URL is preferred over DIRECT_URL (see commit f99111e) to keep
+    // session lookups off the lower-concurrency connection string.
+    connectionString: process.env.DATABASE_URL ?? process.env.DIRECT_URL,
+    max: 5,
+    ssl: { rejectUnauthorized: false },
+  });
+  globalForSessionPool.sessionPool = pool;
+  return pool;
+}
+
 function createSessionStore(): session.Store | undefined {
   if (!isProduction) {
     console.log("[session] Using in-memory store for local development");
@@ -49,19 +67,13 @@ function createSessionStore(): session.Store | undefined {
   }
 
   const PgSession = connectPgSimple(session);
-  // DATABASE_URL is the transaction pooler (high concurrency budget) — DIRECT_URL
-  // is the session pooler, reserved for migrations and capped at 15 clients.
-  // Session lookups happen on every request, so they must not compete for that cap.
-  const sessionConnectionString = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
-  const pool = new pg.Pool({
-    connectionString: sessionConnectionString,
-    max: 5,
-    ssl: { rejectUnauthorized: false },
-  });
 
   return new PgSession({
-    pool,
-    createTableIfMissing: true,
+    pool: getSessionPool(),
+    // The "session" table and its indexes already exist (verified directly
+    // against Postgres) — createTableIfMissing was making every cold start pay
+    // for a to_regclass existence check before the first session query.
+    createTableIfMissing: false,
     tableName: "session",
   });
 }
@@ -129,14 +141,20 @@ app.get("/health", (_req, res) => {
 });
 
 // ─── Protected API routes ─────────────────────────────────────────────────────
-app.use("/api", requireAuth, ensureDbUser, uploadRouter);
-app.use("/api", requireAuth, ensureDbUser, generateRouter);
-app.use("/api", requireAuth, ensureDbUser, runRouter);
-app.use("/api", requireAuth, ensureDbUser, analyzeRouter);
-app.use("/api", requireAuth, ensureDbUser, testsRouter);
-app.use("/api", requireAuth, ensureDbUser, logAnalysesRouter);
-app.use("/api", requireAuth, ensureDbUser, testRunsRouter);
-app.use("/api", requireAuth, ensureDbUser, issuesRouter);
+// Mounted once behind a single requireAuth + ensureDbUser pair — previously each
+// router had its own copy, so a request handled by the last-mounted router (e.g.
+// issuesRouter) paid the cost of both middlewares up to 8 times as it fell through
+// every preceding non-matching router.
+const protectedRouter = express.Router();
+protectedRouter.use(uploadRouter);
+protectedRouter.use(generateRouter);
+protectedRouter.use(runRouter);
+protectedRouter.use(analyzeRouter);
+protectedRouter.use(testsRouter);
+protectedRouter.use(logAnalysesRouter);
+protectedRouter.use(testRunsRouter);
+protectedRouter.use(issuesRouter);
+app.use("/api", requireAuth, ensureDbUser, protectedRouter);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
