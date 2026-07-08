@@ -948,6 +948,27 @@ DIAGNOSTIC METHODOLOGY:
   4. PROVIDE actionable, developer-ready remediation steps.
   5. NEVER speculate — cite specific log lines, error codes, or exceptions as evidence.
 
+ZERO-RESULT HEURISTIC — apply BEFORE concluding a plain data/count mismatch:
+  When a structural assertion fails with a count of exactly ZERO — e.g. \`toHaveCount(0)\`,
+  "Expected: 10, Received: 0", "found none", or any empty list/grid/table where items were
+  expected — do NOT default to "the data didn't load" or "wrong item count". A count of zero
+  on a collection of elements is rarely a partial data problem; it usually means the page
+  itself never rendered its real content at all. Before finalizing the root cause:
+    1. Check whether the test's page.goto()/navigate() call targets a concrete, real URL —
+       or a placeholder, an unresolved relative path, a bare "/", or a route that was never
+       specified in the PRD/test setup.
+    2. Check the logs for signs the page never loaded: a failed navigation, a 404, a blank/
+       empty DOM at assertion time, or no relevant network request completing beforehand.
+    3. If either signal is present, classify this as a NAVIGATION/ENVIRONMENT issue, not a
+       data or locator bug — the page loaded blank, so naturally zero items were found.
+  When this heuristic fires:
+    - rootCause must state that the page likely never navigated to or rendered the real UI —
+      not merely that "items were missing".
+    - suggestedFix's FIRST step must tell the user to verify the target URL/page exists and
+      is reachable, and to update the PRD or test setup (page.goto()) with a valid, accessible
+      address — ahead of any data or locator fix.
+    - category must be "environment".
+
 SEVERITY CLASSIFICATION:
   critical  — data loss, production outage, security breach, process crash
   high      — functional failure, blocked user flow, consistent test failure
@@ -962,6 +983,7 @@ CATEGORY CLASSIFICATION:
   database      — query failure, connection pool exhausted, migration error
   timeout       — request/response timeout, long-running job, idle connection
   config        — missing env var, wrong base URL, misconfigured middleware
+  environment   — page never navigated/rendered (missing or invalid target URL), blank page
   unknown       — insufficient log data to classify
 ═══════════════════════════════════════════════
 OUTPUT — return a single valid JSON object with EXACTLY these keys:
@@ -1148,7 +1170,10 @@ Instructions:
 2. Ignore any DeprecationWarning or url.parse() notices — these are not the cause of failure.
 3. Trace the propagation chain to explain how the failure cascaded.
 4. Classify severity and category based on the actual test/application error, not CI noise.
-5. Return ONLY the JSON object defined in your system instructions — no extra text.`;
+5. If the failure is a zero/empty count on a structural assertion, apply the ZERO-RESULT
+   HEURISTIC from your instructions — check for a missing/invalid target URL before assuming
+   a data mismatch.
+6. Return ONLY the JSON object defined in your system instructions — no extra text.`;
 
   let raw: string;
   if (openaiKey) {
