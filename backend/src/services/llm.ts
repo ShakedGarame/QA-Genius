@@ -962,8 +962,14 @@ ZERO-RESULT HEURISTIC — apply BEFORE concluding a plain data/count mismatch:
     3. If either signal is present, classify this as a NAVIGATION/ENVIRONMENT issue, not a
        data or locator bug — the page loaded blank, so naturally zero items were found.
   When this heuristic fires:
-    - rootCause must state that the page likely never navigated to or rendered the real UI —
-      not merely that "items were missing".
+    - rootCause must lead with the missing configuration/URL as the PRIMARY suspect, not a
+      secondary note — never just state that "items were missing" or "data didn't load".
+      If the count is exactly zero AND the logs show no network request or layout/render
+      error that explains the gap, state it directly and plainly, e.g.:
+      "The test failed because it either navigated to an empty setup/environment or a valid
+      target URL was missing from the initial PRD configuration."
+      Adapt the wording to the specific evidence found, but keep this framing as the
+      headline of the Root Cause sentence, not buried after a data-mismatch explanation.
     - suggestedFix's FIRST step must tell the user to verify the target URL/page exists and
       is reachable, and to update the PRD or test setup (page.goto()) with a valid, accessible
       address — ahead of any data or locator fix.
