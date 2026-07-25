@@ -15,6 +15,7 @@ import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
 
 import passport from "./passportConfig.js";
+import { ResilientSessionStore } from "./lib/resilientSessionStore.js";
 
 import uploadRouter from "./routes/upload.js";
 import generateRouter from "./routes/generate.js";
@@ -56,6 +57,13 @@ function getSessionPool(): pg.Pool {
     max: 5,
     ssl: { rejectUnauthorized: false },
   });
+  // pg.Pool emits 'error' for background/idle-client faults (e.g. Supabase
+  // pooler dropping a connection). With no listener, Node treats that as an
+  // uncaught exception and can take down the whole warm instance — not just
+  // the request that triggered it.
+  pool.on("error", (err) => {
+    console.error("[session] Postgres pool error (connection recovered automatically):", err.message);
+  });
   globalForSessionPool.sessionPool = pool;
   return pool;
 }
@@ -68,7 +76,7 @@ function createSessionStore(): session.Store | undefined {
 
   const PgSession = connectPgSimple(session);
 
-  return new PgSession({
+  const pgStore = new PgSession({
     pool: getSessionPool(),
     // The "session" table and its indexes already exist (verified directly
     // against Postgres) — createTableIfMissing was making every cold start pay
@@ -76,6 +84,12 @@ function createSessionStore(): session.Store | undefined {
     createTableIfMissing: false,
     tableName: "session",
   });
+
+  // Every login goes through Passport's session.regenerate()/save(), both of
+  // which hit this store. If Supabase is temporarily unreachable, fall back
+  // to an in-memory session instead of failing the request — see
+  // ResilientSessionStore for details.
+  return new ResilientSessionStore(pgStore);
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -162,8 +176,17 @@ app.use((_req, res) => {
 });
 
 // ─── Global error handler ─────────────────────────────────────────────────────
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("[error]", err.message);
+  // Express requires this check: an error can surface here after a response
+  // has already started (e.g. a deferred session-store save failing after
+  // res.end() was already called). Calling res.json() again in that case
+  // throws ERR_HTTP_HEADERS_SENT, which crashes the whole request instead of
+  // just logging a background failure. Delegating to the default handler is
+  // the documented way to let Node close the connection safely.
+  if (res.headersSent) {
+    return next(err);
+  }
   res.status(500).json({ error: err.message ?? "Internal server error" });
 });
 
