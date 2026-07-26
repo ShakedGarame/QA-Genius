@@ -7,12 +7,27 @@ import { v4 as uuidv4 } from "uuid";
 
 async function parsePdfBuffer(buffer: Buffer): Promise<string> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pdfParse = require("pdf-parse");
-    const data = await pdfParse(buffer);
-    return data.text;
-  } catch {
-    throw new Error("Failed to parse PDF file. Ensure it is not encrypted.");
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      useWorkerFetch: false,
+      disableFontFace: true,
+    }).promise;
+
+    let text = "";
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ");
+      text += `${pageText}\n`;
+    }
+    return text;
+  } catch (err) {
+    console.error("[parsePdfBuffer]", err instanceof Error ? err.message : err);
+    throw new Error("Failed to parse PDF file. Ensure it is not encrypted or corrupted.");
   }
 }
 
