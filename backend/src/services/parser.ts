@@ -5,6 +5,37 @@ import { v4 as uuidv4 } from "uuid";
 
 // ─── PRD / Text parsers ───────────────────────────────────────────────────────
 
+// pdfjs-dist's legacy build constructs a `DOMMatrix` at module load time
+// (unconditionally, even for text-only extraction) and normally sources it
+// from the optional native `@napi-rs/canvas` package. That package's
+// platform-specific prebuilt binary isn't guaranteed to survive serverless
+// packaging, so provide a minimal pure-JS stand-in — real matrix math is only
+// exercised by page rendering, which this app never does (text extraction
+// only via getTextContent).
+class DOMMatrixPolyfill {
+  multiply(): this {
+    return this;
+  }
+  multiplySelf(): this {
+    return this;
+  }
+  preMultiplySelf(): this {
+    return this;
+  }
+  invertSelf(): this {
+    return this;
+  }
+  translate(): this {
+    return this;
+  }
+  scale(): this {
+    return this;
+  }
+}
+if (typeof (globalThis as { DOMMatrix?: unknown }).DOMMatrix === "undefined") {
+  (globalThis as { DOMMatrix?: unknown }).DOMMatrix = DOMMatrixPolyfill;
+}
+
 async function parsePdfBuffer(buffer: Buffer): Promise<string> {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
