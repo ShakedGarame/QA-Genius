@@ -89,6 +89,24 @@ router.post("/issues/github/create", async (req: Request, res: Response) => {
   }
 });
 
+// Accepts "myco.atlassian.net" as-is, but also tolerates a pasted Jira URL
+// (e.g. "https://myco.atlassian.net/jira/software/projects/SCRUM/boards/1").
+function normalizeJiraDomain(raw: string): string {
+  const trimmed = raw.trim();
+  try {
+    return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).hostname;
+  } catch {
+    return trimmed.replace(/\/.*$/, "");
+  }
+}
+
+// Pulls a project key out of a pasted Jira project/board URL, e.g.
+// ".../jira/software/projects/SCRUM/boards/1" -> "SCRUM".
+function extractProjectKeyFromUrl(raw: string): string | null {
+  const match = raw.match(/\/projects\/([A-Z0-9]+)(?:[/?]|$)/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
 // POST /api/issues/jira/create
 router.post("/issues/jira/create", async (req: Request, res: Response) => {
   const { title, description, projectKey } = req.body as {
@@ -104,12 +122,12 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
   const email = settings?.jira_email || process.env.JIRA_EMAIL;
   const apiToken = settings?.jira_api_token || process.env.JIRA_API_TOKEN;
 
-  // Settings stores the full hostname (e.g. "myco.atlassian.net");
+  // Settings stores a hostname or a pasted Jira URL (e.g. a board link);
   // env var stores just the subdomain (e.g. "myco") for backwards compat.
   const rawDomain = settings?.jira_domain || process.env.JIRA_DOMAIN;
   const domain = rawDomain
     ? rawDomain.includes(".")
-      ? rawDomain           // full hostname from settings
+      ? normalizeJiraDomain(rawDomain)
       : `${rawDomain}.atlassian.net` // legacy subdomain-only env var
     : null;
 
@@ -119,7 +137,13 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
         "Jira not configured. Add your Jira Domain, Account Email, and API Token in Settings → Jira Cloud Integration.",
     });
   }
-  if (!projectKey?.trim()) {
+
+  // If no key was typed, try to recover it from a pasted project/board URL
+  // (e.g. ".../jira/software/projects/SCRUM/boards/1" -> "SCRUM").
+  const resolvedProjectKey =
+    projectKey?.trim() || (rawDomain ? extractProjectKeyFromUrl(rawDomain) : null);
+
+  if (!resolvedProjectKey) {
     return res.status(400).json({ error: "'projectKey' is required" });
   }
   if (!title?.trim()) {
@@ -140,7 +164,7 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
         },
         body: JSON.stringify({
           fields: {
-            project: { key: projectKey.trim().toUpperCase() },
+            project: { key: resolvedProjectKey.toUpperCase() },
             summary: title.trim(),
             description: {
               type: "doc",

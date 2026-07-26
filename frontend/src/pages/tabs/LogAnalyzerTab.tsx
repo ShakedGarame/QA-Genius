@@ -293,10 +293,6 @@ export default function LogAnalyzerTab() {
 
   const handleFileJiraTicket = async () => {
     if (!result) return;
-    if (!jiraProjectKey.trim()) {
-      setJiraErrorMsg("Project Key is required (e.g. QA, BUG)");
-      return;
-    }
     setJiraStatus("loading");
     setJiraErrorMsg(null);
 
@@ -675,7 +671,9 @@ export default function LogAnalyzerTab() {
                   {(jiraStatus === "error" || jiraErrorMsg) && (
                     <p className="text-[10px] text-red-400 max-w-[260px] leading-tight">{jiraErrorMsg}</p>
                   )}
-                  <p className="text-[10px] text-slate-600">Enter project key, then file ticket</p>
+                  <p className="text-[10px] text-slate-600">
+                    Leave blank to use the project key from your Jira Domain URL
+                  </p>
                 </div>
               </div>
             </div>
