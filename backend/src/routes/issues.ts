@@ -107,6 +107,37 @@ function extractProjectKeyFromUrl(raw: string): string | null {
   return match ? match[1].toUpperCase() : null;
 }
 
+// Team-managed Jira projects don't always have "Bug" enabled as an issue
+// type, so look up what the project actually supports instead of assuming.
+// Falls back to "Task" (present on virtually every project) if the lookup
+// itself fails.
+async function resolveJiraIssueType(
+  domain: string,
+  projectKey: string,
+  credentials: string
+): Promise<{ id?: string; name: string }> {
+  try {
+    const res = await fetch(
+      `https://${domain}/rest/api/3/issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes`,
+      { headers: { Authorization: `Basic ${credentials}`, Accept: "application/json" } }
+    );
+    if (!res.ok) return { name: "Task" };
+
+    const data = (await res.json()) as {
+      issueTypes?: { id: string; name: string; subtask?: boolean }[];
+    };
+    const types = (data.issueTypes ?? []).filter((t) => !t.subtask);
+    const preferred =
+      types.find((t) => t.name.toLowerCase() === "bug") ??
+      types.find((t) => t.name.toLowerCase() === "task") ??
+      types[0];
+
+    return preferred ? { id: preferred.id, name: preferred.name } : { name: "Task" };
+  } catch {
+    return { name: "Task" };
+  }
+}
+
 // POST /api/issues/jira/create
 router.post("/issues/jira/create", async (req: Request, res: Response) => {
   const { title, description, projectKey } = req.body as {
@@ -153,6 +184,8 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
   const credentials = Buffer.from(`${email}:${apiToken}`).toString("base64");
 
   try {
+    const issueType = await resolveJiraIssueType(domain, resolvedProjectKey, credentials);
+
     const response = await fetch(
       `https://${domain}/rest/api/3/issue`,
       {
@@ -176,7 +209,7 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
                 },
               ],
             },
-            issuetype: { name: "Bug" },
+            issuetype: issueType.id ? { id: issueType.id } : { name: issueType.name },
           },
         }),
       }
