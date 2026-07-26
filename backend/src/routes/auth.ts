@@ -4,10 +4,12 @@ import passport from "../passportConfig.js";
 import { getOrCreateGuestUser, getOrCreateAdminUser, getUserSettings, upsertUserSettings } from "../db.js";
 import type { DbUser } from "../db.js";
 import { ensureDbUser } from "../middleware/ensureDbUser.js";
+import { GUEST_COOKIE_NAME, guestToken } from "../lib/guestToken.js";
 
 const router = Router();
 
 const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:5173";
+const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
 
 // ─── Admin login rate limiting (per-IP, in-memory) ───────────────────────────
 // Best-effort brute-force guard — resets on cold start, but Fluid Compute
@@ -57,8 +59,21 @@ router.post("/api/auth/mock-login", async (req: Request, res: Response) => {
   try {
     const guestUser = await getOrCreateGuestUser();
 
+    // Stateless safety net (see guestSession middleware): independent of the
+    // Passport session store, so guest access still works on the next
+    // request even if Supabase/the session store is unreachable.
+    res.cookie(GUEST_COOKIE_NAME, guestToken(), {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/",
+    });
+
     req.login(guestUser, (err) => {
-      if (err) return res.status(500).json({ error: "Login failed" });
+      if (err) {
+        console.warn("[mock-login] session save failed — guest cookie above still grants access:", err.message);
+      }
       res.json({
         success: true,
         user: { id: guestUser.id, name: guestUser.name, email: guestUser.email },
@@ -162,6 +177,7 @@ router.post("/auth/logout", (req: Request, res: Response, next: NextFunction) =>
     if (err) return next(err);
     req.session.destroy(() => {
       res.clearCookie("qagenius.sid");
+      res.clearCookie(GUEST_COOKIE_NAME);
       res.json({ success: true });
     });
   });

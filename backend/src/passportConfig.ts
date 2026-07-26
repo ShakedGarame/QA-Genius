@@ -11,8 +11,12 @@ passport.serializeUser((user, done) => {
 });
 
 passport.deserializeUser(async (id: string, done) => {
-  // Fast path: offline guest never exists in DB — skip the round-trip entirely.
-  if (!isProduction && id === buildLocalDevGuest().id) {
+  // Fast path: the offline guest id is a sentinel that never exists as a real
+  // row (see buildLocalDevGuest) — looking it up would just fail against
+  // Supabase and deauthenticate the request. Applies in every environment:
+  // production sessions fall back to this same id whenever Supabase was
+  // unreachable at login time (see getOrCreateGuestUser).
+  if (id === buildLocalDevGuest().id) {
     return done(null, buildLocalDevGuest());
   }
 

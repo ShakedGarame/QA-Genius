@@ -29,6 +29,7 @@ import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { ensureDbUser } from "./middleware/ensureDbUser.js";
 import { autoLocalGuest } from "./middleware/autoLocalGuest.js";
+import { guestSession } from "./middleware/guestSession.js";
 
 const app = express();
 
@@ -122,6 +123,7 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(autoLocalGuest);
+app.use(guestSession);
 
 // ─── Auth routes (public) ─────────────────────────────────────────────────────
 app.use(authRouter);
