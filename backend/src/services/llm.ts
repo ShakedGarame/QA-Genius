@@ -1284,57 +1284,97 @@ Instructions:
 
 const FINTECH_KEYWORDS =
   /\b(payment|checkout|gateway|refund|webhook|merchant of record|MoR|chargeback|billing)\b/i;
+const AUTH_KEYWORDS =
+  /\b(login|log in|log-in|sign in|sign-in|signup|sign up|sign-up|authenticat\w*|password|session|SSO|single sign-on|OAuth|2FA|MFA|multi-factor|access token|refresh token)\b/i;
+const GAMING_KEYWORDS =
+  /\b(game|gaming|player|leaderboard|matchmaking|multiplayer|real-time|realtime|inventory|lobby|latency|respawn)\b/i;
 
+/** Returns "general" or a "+"-joined list of every matched domain (a PRD can match more than one). */
 function detectStdDomain(rawText: string): StdDomain {
-  return FINTECH_KEYWORDS.test(rawText) ? "fintech" : "general";
+  const matches: string[] = [];
+  if (FINTECH_KEYWORDS.test(rawText)) matches.push("fintech");
+  if (AUTH_KEYWORDS.test(rawText)) matches.push("auth");
+  if (GAMING_KEYWORDS.test(rawText)) matches.push("gaming");
+  return matches.length ? matches.join("+") : "general";
 }
 
 const MANUAL_STD_BASE_SYSTEM = `\
-You are a Deep QA Architect writing professional Standard Test Documentation (STD) for a \
-software feature. Before writing any test case, analyze the input for Hidden Requirements \
-(e.g. a "Delete" action implies tests for Undo, Permissions, and Database Integrity), \
-potential failure points in the described logic, and edge cases not explicitly mentioned.
+You are a Deep QA Architect writing professional, engineering-grade Standard Test \
+Documentation (STD) for ANY software feature — Authentication, Gaming, E-commerce, \
+Dashboards, FinTech, or any other domain. Before writing a single test case, analyze the \
+input for Hidden Requirements (e.g. a "Delete" action implies tests for Undo, Permissions, \
+and Database Integrity even if never stated), potential failure points in the described \
+logic, and edge cases not explicitly mentioned.
 
 ═══════════════════════════════════════════════
-MANDATORY CATEGORY COVERAGE — every STD must include all six categories below, with at
-least 2-3 test cases per category:
-  A — Dashboard / Entry Point   — alert visibility, count accuracy, persistence, refresh behavior
-  B — Detail View / Side Panel — field accuracy, stale data, owner fallback, panel open/close
-  C — Core Action               — happy path, post-action state, feedback messages
-  D — Edge Cases / BVA          — max lengths, empty fields, concurrent actions, network interruptions
-  E — Data Integrity            — DB ↔ UI field-level comparison; count consistency
-  F — Security                  — RBAC (UI + API layers), JWT expiry, IDOR / multi-tenant isolation,
-                                   session invalidation
+STEP 1 — IDENTIFY MODULES (never abstract categories):
+  Read the entire input and split it into its distinct functional modules / feature areas
+  (typically 3-7, depending on complexity). Give each one a clear, human-readable,
+  descriptive title — NEVER a bare letter, number, or generic label. Required format:
+  "Module 1: User Authentication & SSO", "Module 2: Dynamic APM Routing",
+  "Module 3: Error Handling & Security", "Module 4: Payment Checkout Flow".
+  Every test case's "category" field MUST be one of these exact module title strings.
 
-ADVANCED METHODOLOGIES — apply all four across the categories above:
+STEP 2 — MANDATORY TEST CATEGORY DIVERSITY (distribute across the modules above; every one
+  of these six angles MUST be represented by at least 2-3 test cases somewhere in the STD,
+  regardless of domain):
+  1. Happy Path / Functional Workflows        — the primary documented flow succeeds end-to-end
+  2. Negative Testing & Boundary Value Analysis (BVA) — invalid/empty/null/oversized input,
+                                                  malformed payloads, boundary limits (0, -1, max int)
+  3. Edge Cases & Race Conditions / Concurrency — simultaneous duplicate actions, out-of-order
+                                                  events, stale writes, double-submits
+  4. Security, Authentication & Authorization (RBAC) — role matrix (e.g. Viewer/Owner/Admin) at
+                                                  BOTH UI and API layers, JWT expiry/tampering,
+                                                  IDOR / cross-tenant access, session invalidation
+  5. Data Integrity, Database State & Event Validation — for every value shown in the UI, describe
+                                                  the literal SQL query or event/webhook payload
+                                                  that proves the backing store holds the same value
+  6. Failover, Timeouts, Error Handling & Async Recovery — upstream 5xx/timeout, retry-with-
+                                                  backoff, async job failure, partial-failure recovery
+
+STEP 3 — DYNAMIC DOMAIN ADAPTATION — apply any of the following addenda that were appended
+  to these instructions (they are appended only when the input actually matches that domain).
+  If none were appended, Steps 1-2 alone must still produce a complete, rigorous STD — never
+  force irrelevant FinTech/Auth/Gaming cases onto an unrelated domain.
+
+STEP 4 — GRANULARITY (non-negotiable):
+  - Minimum 20 to 25 test cases total. Fewer than 20 is an incomplete STD — do not stop early,
+    and do not pad with near-duplicate cases; every case must exercise a distinct condition.
+  - 100% requirement coverage: every functional requirement, sub-feature, and implied edge
+    case in the source document must map to at least one test case in "coverage" — no gaps.
+  - "steps" must NEVER be a vague one-liner. Specify exact parameters, HTTP status codes
+    (e.g. "assert response status is 410 Gone", "assert 401 Unauthorized"), concrete UI
+    actions (e.g. "click the 'Confirm Refund' button"), and literal SQL DB assertions where
+    relevant (e.g. "SELECT status FROM orders WHERE id = :orderId — expect status = 'REFUNDED'").
+  - If you are at risk of running out of output space, prioritize completing ALL 20-25 test
+    cases with concise-but-concrete steps over elaborating a smaller number at length.
+
+ADVANCED METHODOLOGIES — apply throughout:
   BVA (Boundary Value Analysis)     — test at limits: max characters, 0, -1, empty, null, max integers
   Negative Testing                  — invalid tokens, network interruptions, expired sessions,
                                        concurrent duplicate actions
-  Data Integrity                    — for every value displayed in the UI, describe the companion
-                                       SQL query that verifies the DB holds the exact same value;
-                                       verify counts before/after actions, status field updates,
-                                       audit metadata (user, timestamp, action)
+  Data Integrity                    — UI ↔ DB field-level comparison via literal SQL; count
+                                       consistency before/after actions; audit metadata
+                                       (user, timestamp, action)
   Security                          — RBAC matrix across every role (Viewer / Owner / Admin) against
                                        every sensitive action at both UI and API layers; expired/
                                        tampered JWT, post-logout token replay, session expiry
                                        mid-action; IDOR cross-tenant resource access attempts
 
-COVERAGE REQUIREMENT — ensure 1:1 mapping between every stated feature requirement and at
-least one test case; return this mapping as the "coverage" array.
-
-LANGUAGE: Professional, dry, technical English throughout — never casual or informal phrasing.
+LANGUAGE: Professional, dry, technical English throughout — never casual or informal phrasing,
+regardless of the language of the source document.
 ═══════════════════════════════════════════════
 OUTPUT CONTRACT — return ONLY a single raw JSON object with EXACTLY this shape (no markdown
 fences, no commentary before or after):
 {
   "testCases": [
     {
-      "category": "A" | "B" | "C" | "D" | "E" | "F",
+      "category": "Module 1: <descriptive module/feature-area title>",
       "id": "TC-01",
-      "testType": "UI" | "Functional" | "Security/RBAC" | "Data Integrity" | "API" | "Negative" | "Accessibility" | "Integration",
+      "testType": "UI" | "Functional" | "Security/RBAC" | "Data Integrity" | "API" | "Negative" | "Accessibility" | "Integration" | "Concurrency" | "Performance",
       "scenario": "Professional description, e.g. 'Verify system behavior under concurrent API requests'",
       "preconditions": ["Exact environment state, data setup, user permissions — one item per line"],
-      "steps": ["Granular, numbered, step-by-step execution instructions — one item per array entry"],
+      "steps": ["Granular, numbered, step-by-step execution instructions with concrete params/status codes/SQL — one item per array entry"],
       "expectedResult": "Binary success criteria — exactly what should happen",
       "validationMethod": "How to verify the test passed, e.g. SQL Query | UI Check | Network Tab | API Response (curl/Postman) | Browser Console | Audit Log",
       "riskLevel": "P0" | "P1" | "P2" | "P3",
@@ -1350,16 +1390,17 @@ RISK LEVELS: P0 = critical (system crash, data loss, security breach) · P1 = hi
 feature broken, no workaround) · P2 = medium (degraded experience, workaround exists) ·
 P3 = low (cosmetic, edge case, minor UX issue).
 
-IDs are sequential (TC-01, TC-02, …) and never reused. Every test case's "steps" must be
-concrete and executable by a manual tester with no other context.`;
+IDs are sequential across the ENTIRE document (TC-01, TC-02, … TC-25 or beyond) regardless
+of module — never restart numbering per module, never reuse an ID. Every test case's
+"steps" must be concrete and executable by a manual tester with no other context.`;
 
 const MANUAL_STD_FINTECH_ADDENDUM = `
 
 ═══════════════════════════════════════════════
 FINTECH / PAYMENT DOMAIN DETECTED — the input references payments, checkout, gateways,
-refunds, webhooks, or Merchant of Record (MoR) logic. In addition to the six mandatory
-categories above, you MUST include dedicated test cases (place them under whichever of
-categories C/D/E/F fits best) covering every one of the following:
+refunds, webhooks, or Merchant of Record (MoR) logic. On top of Steps 1-2, you MUST include
+dedicated test cases (place them in whichever module fits best, or create a dedicated
+module such as "Module N: Payment & Webhook Reliability") covering every one of:
   - Idempotency        — retrying the same charge/refund request (e.g. via an Idempotency-Key
                           header or client-generated request ID) must NEVER create a duplicate
                           charge, duplicate refund, or duplicate order.
@@ -1374,21 +1415,74 @@ categories C/D/E/F fits best) covering every one of the following:
   - Tax / VAT Compliance — tax/VAT is computed from the correct jurisdiction when the billing
                           address and the request's IP-derived country disagree; include a test
                           asserting which one the system is documented to prioritize.
-These are non-negotiable additions on top of, not instead of, the six mandatory categories.`;
+These are non-negotiable additions on top of, not instead of, Steps 1-2.`;
+
+const MANUAL_STD_AUTH_ADDENDUM = `
+
+═══════════════════════════════════════════════
+AUTH / SECURITY DOMAIN DETECTED — the input references login, sessions, tokens, SSO, or
+credential handling. On top of Steps 1-2, you MUST include dedicated test cases (place
+them in whichever module fits best, or create "Module N: Authentication & Session Security")
+covering every one of:
+  - Token TTL & Expiry  — an access token expires exactly at its documented TTL; a request
+                          made one second after expiry is rejected with 401.
+  - Session Expiration  — a session that expires mid-action forces re-authentication rather
+                          than silently completing (or corrupting) the in-flight action.
+  - Password Policy     — complexity rules, password reuse/history, and account lockout after
+                          N consecutive failed attempts are enforced.
+  - Rate Limiting        — repeated login attempts against the same account/IP are throttled;
+                          verify the exact status code (e.g. 429) and lockout/backoff window.
+  - OWASP Edge Cases     — credential stuffing resistance, session fixation (session ID must
+                          rotate on login), and CSRF token validation on state-changing requests.
+These are non-negotiable additions on top of, not instead of, Steps 1-2.`;
+
+const MANUAL_STD_GAMING_ADDENDUM = `
+
+═══════════════════════════════════════════════
+GAMING / REAL-TIME DOMAIN DETECTED — the input references gameplay, players, matchmaking,
+or other real-time/multiplayer mechanics. On top of Steps 1-2, you MUST include dedicated
+test cases (place them in whichever module fits best, or create "Module N: Real-Time State
+& Reconnection") covering every one of:
+  - State Synchronization — two concurrent clients acting on the same shared state (e.g. the
+                          same match, inventory, or leaderboard) converge to one consistent
+                          server-authoritative outcome, not two conflicting client states.
+  - Latency Handling     — an action submitted under simulated high latency does not produce
+                          a different outcome than the same action under normal latency.
+  - Disconnection / Reconnection — a player who disconnects mid-session can reconnect and
+                          resume with the server's authoritative state, without duplicating
+                          or losing in-progress actions/rewards.
+  - Inventory Integrity  — concurrent updates to the same player's inventory/currency (e.g.
+                          two simultaneous "claim reward" requests) never result in a double
+                          grant or a lost item.
+These are non-negotiable additions on top of, not instead of, Steps 1-2.`;
 
 function buildManualStdSystemPrompt(rawText: string): { prompt: string; domain: StdDomain } {
   const domain = detectStdDomain(rawText);
-  return {
-    prompt: domain === "fintech" ? MANUAL_STD_BASE_SYSTEM + MANUAL_STD_FINTECH_ADDENDUM : MANUAL_STD_BASE_SYSTEM,
-    domain,
-  };
+  const addenda = [
+    domain.includes("fintech") && MANUAL_STD_FINTECH_ADDENDUM,
+    domain.includes("auth") && MANUAL_STD_AUTH_ADDENDUM,
+    domain.includes("gaming") && MANUAL_STD_GAMING_ADDENDUM,
+  ]
+    .filter((a): a is string => Boolean(a))
+    .join("");
+  return { prompt: MANUAL_STD_BASE_SYSTEM + addenda, domain };
 }
 
 function buildMockManualStd(featureName: string, domain: StdDomain): { testCases: ManualStdTestCase[]; coverage: StdCoverageRow[] } {
+  const MOD_ENTRY = `Module 1: ${featureName} Dashboard & Entry Point`;
+  const MOD_CORE = `Module 2: ${featureName} Core Action Workflow`;
+  const MOD_EDGE = `Module 3: Edge Cases & Concurrency`;
+  const MOD_DATA = `Module 4: Data Integrity`;
+  const MOD_SEC = `Module 5: Security & Access Control`;
+  const MOD_RESILIENCE = `Module 6: Failover, Timeouts & Async Recovery`;
+
+  let nextId = 1;
+  const id = () => `TC-${String(nextId++).padStart(2, "0")}`;
+
   const testCases: ManualStdTestCase[] = [
     {
-      category: "A",
-      id: "TC-01",
+      category: MOD_ENTRY,
+      id: id(),
       testType: "UI",
       scenario: `Verify ${featureName} entry point renders with accurate initial state`,
       preconditions: ["User is authenticated with a standard role", `${featureName} module is enabled for the account`],
@@ -1399,8 +1493,8 @@ function buildMockManualStd(featureName: string, domain: StdDomain): { testCases
       riskImpact: "Incorrect entry-point data misleads users on first impression of the feature",
     },
     {
-      category: "C",
-      id: "TC-02",
+      category: MOD_CORE,
+      id: id(),
       testType: "Functional",
       scenario: `Verify the core action of ${featureName} completes successfully (happy path)`,
       preconditions: ["User has permission to perform the action", "Required upstream data exists"],
@@ -1411,8 +1505,8 @@ function buildMockManualStd(featureName: string, domain: StdDomain): { testCases
       riskImpact: "A broken core action blocks the primary user flow with no workaround",
     },
     {
-      category: "D",
-      id: "TC-03",
+      category: MOD_EDGE,
+      id: id(),
       testType: "Negative",
       scenario: `Verify ${featureName} rejects an invalid/boundary input`,
       preconditions: ["User is on the relevant input form"],
@@ -1423,8 +1517,20 @@ function buildMockManualStd(featureName: string, domain: StdDomain): { testCases
       riskImpact: "Silent acceptance of invalid input can corrupt downstream data",
     },
     {
-      category: "E",
-      id: "TC-04",
+      category: MOD_EDGE,
+      id: id(),
+      testType: "Concurrency",
+      scenario: `Verify two simultaneous submissions of the same ${featureName} action do not create duplicate state`,
+      preconditions: ["User has permission to perform the action", "No prior in-flight request exists"],
+      steps: ["Fire two identical requests for the action in immediate succession", "Query the resulting records for this action"],
+      expectedResult: "Exactly one resulting record/state change exists — the second request is a no-op or rejected",
+      validationMethod: "SQL Query",
+      riskLevel: "P1",
+      riskImpact: "Duplicate concurrent writes can corrupt downstream state or double-charge/double-grant users",
+    },
+    {
+      category: MOD_DATA,
+      id: id(),
       testType: "Data Integrity",
       scenario: `Verify ${featureName}'s displayed value matches the persisted database record`,
       preconditions: ["A record exists for this feature with a known value"],
@@ -1435,8 +1541,8 @@ function buildMockManualStd(featureName: string, domain: StdDomain): { testCases
       riskImpact: "A UI/DB mismatch means users are acting on stale or incorrect information",
     },
     {
-      category: "F",
-      id: "TC-05",
+      category: MOD_SEC,
+      id: id(),
       testType: "Security/RBAC",
       scenario: `Verify a Viewer-role user cannot perform the restricted action in ${featureName}`,
       preconditions: ["A user with Viewer role is authenticated", "A user with Owner role exists for comparison"],
@@ -1446,12 +1552,24 @@ function buildMockManualStd(featureName: string, domain: StdDomain): { testCases
       riskLevel: "P0",
       riskImpact: "A broken RBAC boundary allows privilege escalation across the entire feature",
     },
+    {
+      category: MOD_RESILIENCE,
+      id: id(),
+      testType: "Performance",
+      scenario: `Verify ${featureName} degrades gracefully when its upstream dependency times out`,
+      preconditions: ["Upstream dependency can be simulated to return a 504/timeout"],
+      steps: ["Force the upstream call to time out", "Observe the resulting UI/API response"],
+      expectedResult: "A graceful fallback/error state is shown; the request is retried with backoff, no partial state is left behind",
+      validationMethod: "Network Tab",
+      riskLevel: "P1",
+      riskImpact: "An unhandled upstream timeout can hang the UI or leave the system in an inconsistent state",
+    },
   ];
 
-  if (domain === "fintech") {
+  if (domain.includes("fintech")) {
     testCases.push({
-      category: "D",
-      id: "TC-06",
+      category: "Module 7: Payment & Webhook Reliability",
+      id: id(),
       testType: "Negative",
       scenario: "Verify retrying a charge request with the same Idempotency-Key never creates a duplicate charge",
       preconditions: ["A valid payment method is on file", "An Idempotency-Key header is supported by the endpoint"],
@@ -1467,16 +1585,47 @@ function buildMockManualStd(featureName: string, domain: StdDomain): { testCases
     });
   }
 
-  const coverage: StdCoverageRow[] = [
-    { requirement: `${featureName} entry point is visible and accurate`, testCaseIds: ["TC-01"] },
-    { requirement: `${featureName} core action completes successfully`, testCaseIds: ["TC-02"] },
-    { requirement: "Invalid input is rejected with a clear error", testCaseIds: ["TC-03"] },
-    { requirement: "UI state matches the database record", testCaseIds: ["TC-04"] },
-    { requirement: "Restricted actions are blocked for unauthorized roles", testCaseIds: ["TC-05"] },
-  ];
-  if (domain === "fintech") {
-    coverage.push({ requirement: "Duplicate charge/refund requests are prevented (idempotency)", testCaseIds: ["TC-06"] });
+  if (domain.includes("auth")) {
+    testCases.push({
+      category: "Module 8: Authentication & Session Security",
+      id: id(),
+      testType: "Security/RBAC",
+      scenario: "Verify an access token is rejected exactly at its documented TTL expiry",
+      preconditions: ["A user is authenticated and holds a token with a known TTL"],
+      steps: [
+        "Wait until 1 second after the token's documented TTL has elapsed",
+        "Send a request to a protected endpoint using the expired token",
+      ],
+      expectedResult: "The request is rejected with 401 Unauthorized; no protected data is returned",
+      validationMethod: "API Response (curl/Postman)",
+      riskLevel: "P0",
+      riskImpact: "A token that outlives its documented TTL is a session-hijacking / compliance risk",
+    });
   }
+
+  if (domain.includes("gaming")) {
+    testCases.push({
+      category: "Module 9: Real-Time State & Reconnection",
+      id: id(),
+      testType: "Concurrency",
+      scenario: "Verify a player who disconnects mid-session can reconnect without duplicating or losing rewards",
+      preconditions: ["A player session is active with a pending reward/state change"],
+      steps: [
+        "Force-disconnect the client mid-action",
+        "Reconnect the same player session",
+        "Query the player's authoritative server-side state",
+      ],
+      expectedResult: "The player resumes with exactly the server's authoritative state — no duplicated or lost rewards",
+      validationMethod: "SQL Query",
+      riskLevel: "P1",
+      riskImpact: "Reconnection bugs that duplicate or drop rewards directly damage game economy integrity",
+    });
+  }
+
+  const coverage: StdCoverageRow[] = testCases.map((tc) => ({
+    requirement: tc.scenario,
+    testCaseIds: [tc.id],
+  }));
 
   return { testCases, coverage };
 }
@@ -1497,8 +1646,8 @@ export async function generateManualStd(
 
   const userPrompt = `\
 Write a complete Standard Test Documentation (STD) for the feature described below.
-Apply the mandatory category coverage, methodologies, and JSON output contract from your
-system instructions exactly.
+Apply the module identification, mandatory test category diversity, domain addenda, and
+JSON output contract from your system instructions exactly.
 
 ═══════════════════════════════════════════════
 ## Feature Name
@@ -1507,21 +1656,30 @@ ${featureName}
 ## Source Document (PRD / Swagger)
 ${rawText.slice(0, 12000)}
 ═══════════════════════════════════════════════
+Requirements:
+- Generate a MINIMUM of 20-25 distinct, granular test cases — this is a hard floor, not a target.
+- Group every test case under a descriptive module title (never an abstract letter/number alone).
+- Ensure 100% of the requirements above are mapped in "coverage" — no PRD requirement left uncovered.
+- Steps must include concrete parameters, HTTP status codes, and literal SQL/DB assertions where relevant.
 Return ONLY the JSON object defined in your system instructions — no extra text, no
 markdown fences.`;
 
-  // STD output is a large structured JSON payload (6 mandatory categories × 2-3 cases each,
-  // plus the FinTech addendum and a coverage table) — the default 3000-token budget shared
-  // by the other skills routinely truncates it mid-object, so this call gets a larger one.
-  const STD_MAX_TOKENS = 6000;
+  // STD output is now a large structured JSON payload — 20-25 granular test cases across
+  // several modules, each with detailed multi-step instructions, plus domain addenda and a
+  // full coverage table. The default 3000-token budget shared by the other skills would
+  // truncate this mid-object almost immediately, so this call gets a much larger budget.
+  // OpenAI (gpt-4o) supports up to ~16384 output tokens; Anthropic's default max_tokens cap
+  // without the extended-output beta header is lower, so it gets a smaller (still generous) budget.
+  const STD_MAX_TOKENS_OPENAI = 16000;
+  const STD_MAX_TOKENS_ANTHROPIC = 8000;
 
   let raw: string;
   let model: string;
   if (openaiKey) {
-    raw = await callOpenAI(systemPrompt, userPrompt, openaiKey, STD_MAX_TOKENS);
+    raw = await callOpenAI(systemPrompt, userPrompt, openaiKey, STD_MAX_TOKENS_OPENAI);
     model = OPENAI_MODEL;
   } else {
-    raw = await callAnthropic(systemPrompt, userPrompt, STD_MAX_TOKENS);
+    raw = await callAnthropic(systemPrompt, userPrompt, STD_MAX_TOKENS_ANTHROPIC);
     model = ANTHROPIC_MODEL;
   }
 

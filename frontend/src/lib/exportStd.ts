@@ -19,7 +19,6 @@ function downloadBlob(content: BlobPart, mimeType: string, fileName: string): vo
 }
 
 const CSV_HEADERS = [
-  "Category",
   "ID",
   "Test Type",
   "Test Scenario",
@@ -31,24 +30,42 @@ const CSV_HEADERS = [
   "Risk Impact",
 ];
 
+/** Groups rows by their category (module title) while preserving first-seen order. */
+function groupByCategory(testCases: ManualStdTestCase[]): { title: string; rows: ManualStdTestCase[] }[] {
+  const groups: { title: string; rows: ManualStdTestCase[] }[] = [];
+  for (const tc of testCases) {
+    const last = groups[groups.length - 1];
+    if (last && last.title === tc.category) {
+      last.rows.push(tc);
+    } else {
+      groups.push({ title: tc.category, rows: [tc] });
+    }
+  }
+  return groups;
+}
+
 /** Column order matches TestRail/Jira Xray manual-test-case import expectations. */
 export function exportStdToCsv(testCases: ManualStdTestCase[], featureName: string): void {
-  const rows = testCases.map((tc) => [
-    tc.category,
-    tc.id,
-    tc.testType,
-    tc.scenario,
-    tc.preconditions.join("; "),
-    tc.steps.map((s, i) => `${i + 1}. ${s}`).join(" | "),
-    tc.expectedResult,
-    tc.validationMethod,
-    tc.riskLevel,
-    tc.riskImpact,
-  ]);
+  const lines: string[][] = [CSV_HEADERS];
 
-  const csv = [CSV_HEADERS, ...rows]
-    .map((row) => row.map((cell) => csvEscape(String(cell))).join(","))
-    .join("\r\n");
+  for (const group of groupByCategory(testCases)) {
+    lines.push([`## ${group.title}`]);
+    for (const tc of group.rows) {
+      lines.push([
+        tc.id,
+        tc.testType,
+        tc.scenario,
+        tc.preconditions.join("; "),
+        tc.steps.map((s, i) => `${i + 1}. ${s}`).join(" | "),
+        tc.expectedResult,
+        tc.validationMethod,
+        tc.riskLevel,
+        tc.riskImpact,
+      ]);
+    }
+  }
+
+  const csv = lines.map((row) => row.map((cell) => csvEscape(String(cell))).join(",")).join("\r\n");
 
   const slug = featureName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 50) || "std";
   downloadBlob(csv, "text/csv;charset=utf-8", `STD_${slug}_${Date.now()}.csv`);
@@ -61,11 +78,25 @@ const RISK_COLORS: Record<string, [number, number, number]> = {
   P3: [39, 174, 96],
 };
 
+const DOMAIN_LABELS: Record<string, string> = {
+  fintech: "FinTech-Adaptive",
+  auth: "Auth-Adaptive",
+  gaming: "Gaming-Adaptive",
+  general: "General",
+};
+
+function formatDomainLabel(domain: string): string {
+  return domain
+    .split("+")
+    .map((d) => DOMAIN_LABELS[d] ?? d)
+    .join(" + ");
+}
+
 export async function exportStdToPdf(
   testCases: ManualStdTestCase[],
   coverage: StdCoverageRow[],
   featureName: string,
-  domain: "fintech" | "general"
+  domain: string
 ): Promise<void> {
   const [{ default: jsPDF }, autoTableModule] = await Promise.all([
     import("jspdf"),
@@ -80,35 +111,47 @@ export async function exportStdToPdf(
   doc.setFontSize(10);
   doc.setTextColor(100);
   doc.text(
-    `Generated ${new Date().toLocaleString()} · ${testCases.length} test cases · Domain: ${domain === "fintech" ? "FinTech-Adaptive" : "General"}`,
+    `Generated ${new Date().toLocaleString()} · ${testCases.length} test cases · Domain: ${formatDomainLabel(domain)}`,
     40,
     58
   );
 
+  const body: (string | { content: string; colSpan: number; styles: Record<string, unknown> })[][] = [];
+  for (const group of groupByCategory(testCases)) {
+    body.push([
+      {
+        content: group.title,
+        colSpan: 8,
+        styles: { fillColor: [230, 233, 237], textColor: [44, 62, 80], fontStyle: "bold", halign: "left" },
+      },
+    ]);
+    for (const tc of group.rows) {
+      body.push([
+        tc.id,
+        tc.testType,
+        tc.scenario,
+        tc.preconditions.join("; "),
+        tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n"),
+        tc.expectedResult,
+        tc.validationMethod,
+        tc.riskLevel,
+      ]);
+    }
+  }
+
   autoTable(doc, {
     startY: 75,
-    head: [["Cat", "ID", "Type", "Scenario", "Pre-requisites", "Steps", "Expected Result", "Validation", "Risk"]],
-    body: testCases.map((tc) => [
-      tc.category,
-      tc.id,
-      tc.testType,
-      tc.scenario,
-      tc.preconditions.join("; "),
-      tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n"),
-      tc.expectedResult,
-      tc.validationMethod,
-      tc.riskLevel,
-    ]),
+    head: [["ID", "Type", "Scenario", "Pre-requisites", "Steps", "Expected Result", "Validation", "Risk"]],
+    body,
     styles: { fontSize: 7.5, cellPadding: 4, valign: "top" },
     headStyles: { fillColor: [44, 62, 80], textColor: 255, fontStyle: "bold" },
     columnStyles: {
-      0: { cellWidth: 25 },
-      1: { cellWidth: 45 },
-      3: { cellWidth: 110 },
-      5: { cellWidth: 140 },
+      0: { cellWidth: 45 },
+      2: { cellWidth: 110 },
+      4: { cellWidth: 140 },
     },
     didParseCell: (data) => {
-      if (data.section === "body" && data.column.index === 8) {
+      if (data.section === "body" && data.column.index === 7) {
         const level = String(data.cell.raw);
         const color = RISK_COLORS[level];
         if (color) {

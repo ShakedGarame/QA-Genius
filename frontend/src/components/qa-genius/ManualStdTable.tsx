@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Download, FileSpreadsheet, ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import type { ManualStdTestCase, StdCoverageRow, StdDomain, StdRiskLevel, StdTestType } from "../../types";
@@ -21,16 +21,37 @@ const TEST_TYPE_STYLES: Record<StdTestType, string> = {
   Negative: "bg-amber-500/10 text-amber-400 border-amber-500/30",
   Accessibility: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/30",
   Integration: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
+  Concurrency: "bg-orange-500/10 text-orange-400 border-orange-500/30",
+  Performance: "bg-lime-500/10 text-lime-400 border-lime-500/30",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  A: "Dashboard / Entry Point",
-  B: "Detail View / Side Panel",
-  C: "Core Action",
-  D: "Edge Cases / BVA",
-  E: "Data Integrity",
-  F: "Security",
+const DOMAIN_LABELS: Record<string, string> = {
+  fintech: "FinTech-Adaptive",
+  auth: "Auth-Adaptive",
+  gaming: "Gaming-Adaptive",
+  general: "General",
 };
+
+const DOMAIN_STYLES: Record<string, string> = {
+  fintech: "bg-violet-500/10 text-violet-400 border-violet-500/30",
+  auth: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+  gaming: "bg-pink-500/10 text-pink-400 border-pink-500/30",
+  general: "bg-slate-500/10 text-slate-400 border-slate-500/30",
+};
+
+/** Groups rows by their category (module title) while preserving first-seen order. */
+function groupByCategory(testCases: ManualStdTestCase[]): { title: string; rows: ManualStdTestCase[] }[] {
+  const groups: { title: string; rows: ManualStdTestCase[] }[] = [];
+  for (const tc of testCases) {
+    const last = groups[groups.length - 1];
+    if (last && last.title === tc.category) {
+      last.rows.push(tc);
+    } else {
+      groups.push({ title: tc.category, rows: [tc] });
+    }
+  }
+  return groups;
+}
 
 function Pill({ className, children }: { className: string; children: React.ReactNode }) {
   return (
@@ -79,15 +100,11 @@ export default function ManualStdTable({ testCases, coverage, featureName, domai
           <Pill className={isMock ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"}>
             {isMock ? "MOCK" : model}
           </Pill>
-          <Pill
-            className={
-              domain === "fintech"
-                ? "bg-violet-500/10 text-violet-400 border-violet-500/30"
-                : "bg-slate-500/10 text-slate-400 border-slate-500/30"
-            }
-          >
-            {domain === "fintech" ? "FinTech-Adaptive" : "General"}
-          </Pill>
+          {domain.split("+").map((d) => (
+            <Pill key={d} className={DOMAIN_STYLES[d] ?? DOMAIN_STYLES.general}>
+              {DOMAIN_LABELS[d] ?? d}
+            </Pill>
+          ))}
           <span className="text-[11px] text-slate-500">{testCases.length} test cases</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -104,7 +121,7 @@ export default function ManualStdTable({ testCases, coverage, featureName, domai
         <table className="w-full text-xs border-collapse">
           <thead className="sticky top-0 z-10 bg-surface-700 text-slate-300">
             <tr>
-              {["Cat", "ID", "Test Type", "Test Scenario", "Pre-requisites", "Execution Steps", "Expected Result", "Validation Method", "Risk"].map((h) => (
+              {["ID", "Test Type", "Test Scenario", "Pre-requisites", "Execution Steps", "Expected Result", "Validation Method", "Risk"].map((h) => (
                 <th key={h} className="text-left font-semibold uppercase tracking-wider text-[10px] px-3 py-2 border-b border-surface-500 whitespace-nowrap">
                   {h}
                 </th>
@@ -112,31 +129,39 @@ export default function ManualStdTable({ testCases, coverage, featureName, domai
             </tr>
           </thead>
           <tbody>
-            {testCases.map((tc, i) => (
-              <tr key={tc.id} className={clsx("align-top border-b border-surface-700/60", i % 2 === 1 && "bg-surface-900/30")}>
-                <td className="px-3 py-2.5 text-slate-400" title={CATEGORY_LABELS[tc.category]}>{tc.category}</td>
-                <td className="px-3 py-2.5 font-mono font-semibold text-slate-200 whitespace-nowrap">{tc.id}</td>
-                <td className="px-3 py-2.5"><Pill className={TEST_TYPE_STYLES[tc.testType]}>{tc.testType}</Pill></td>
-                <td className="px-3 py-2.5 text-slate-200 min-w-[180px]">{tc.scenario}</td>
-                <td className="px-3 py-2.5 text-slate-400 min-w-[160px]">
-                  <ul className="list-disc list-inside space-y-0.5">
-                    {tc.preconditions.map((p, idx) => <li key={idx}>{p}</li>)}
-                  </ul>
-                </td>
-                <td className="px-3 py-2.5 text-slate-300 min-w-[220px]">
-                  <ol className="list-decimal list-inside space-y-0.5">
-                    {tc.steps.map((s, idx) => <li key={idx}>{s}</li>)}
-                  </ol>
-                </td>
-                <td className="px-3 py-2.5 text-slate-300 min-w-[180px]">{tc.expectedResult}</td>
-                <td className="px-3 py-2.5 text-slate-400 italic whitespace-nowrap">{tc.validationMethod}</td>
-                <td className="px-3 py-2.5">
-                  <div className="flex flex-col gap-1 items-start">
-                    <Pill className={RISK_STYLES[tc.riskLevel]}>{tc.riskLevel}</Pill>
-                    <span className="text-[10px] text-slate-500 max-w-[140px] leading-snug">{tc.riskImpact}</span>
-                  </div>
-                </td>
-              </tr>
+            {groupByCategory(testCases).map((group) => (
+              <Fragment key={group.title}>
+                <tr>
+                  <td colSpan={8} className="px-3 py-1.5 bg-surface-700/60 text-slate-300 font-semibold text-[11px] uppercase tracking-wide border-b border-surface-500">
+                    {group.title}
+                  </td>
+                </tr>
+                {group.rows.map((tc, i) => (
+                  <tr key={tc.id} className={clsx("align-top border-b border-surface-700/60", i % 2 === 1 && "bg-surface-900/30")}>
+                    <td className="px-3 py-2.5 font-mono font-semibold text-slate-200 whitespace-nowrap">{tc.id}</td>
+                    <td className="px-3 py-2.5"><Pill className={TEST_TYPE_STYLES[tc.testType]}>{tc.testType}</Pill></td>
+                    <td className="px-3 py-2.5 text-slate-200 min-w-[180px]">{tc.scenario}</td>
+                    <td className="px-3 py-2.5 text-slate-400 min-w-[160px]">
+                      <ul className="list-disc list-inside space-y-0.5">
+                        {tc.preconditions.map((p, idx) => <li key={idx}>{p}</li>)}
+                      </ul>
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-300 min-w-[220px]">
+                      <ol className="list-decimal list-inside space-y-0.5">
+                        {tc.steps.map((s, idx) => <li key={idx}>{s}</li>)}
+                      </ol>
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-300 min-w-[180px]">{tc.expectedResult}</td>
+                    <td className="px-3 py-2.5 text-slate-400 italic whitespace-nowrap">{tc.validationMethod}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-col gap-1 items-start">
+                        <Pill className={RISK_STYLES[tc.riskLevel]}>{tc.riskLevel}</Pill>
+                        <span className="text-[10px] text-slate-500 max-w-[140px] leading-snug">{tc.riskImpact}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </Fragment>
             ))}
           </tbody>
         </table>

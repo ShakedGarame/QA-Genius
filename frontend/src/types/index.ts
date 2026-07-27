@@ -152,9 +152,15 @@ export interface FeatureGroup {
 
 // ─── Manual STD (Standard Test Documentation) generator ───────────────────────
 
-export type StdDomain = "fintech" | "general";
+/**
+ * "general" or any "+"-joined combination of detected domains, e.g. "fintech",
+ * "auth", "fintech+auth". Free-form so new domains can be added without a
+ * schema change.
+ */
+export type StdDomain = string;
 
-export type StdCategory = "A" | "B" | "C" | "D" | "E" | "F";
+/** Human-readable module/feature-area title, e.g. "Module 1: User Authentication & SSO". */
+export type StdCategory = string;
 
 export type StdTestType =
   | "UI"
@@ -164,7 +170,9 @@ export type StdTestType =
   | "API"
   | "Negative"
   | "Accessibility"
-  | "Integration";
+  | "Integration"
+  | "Concurrency"
+  | "Performance";
 
 export type StdRiskLevel = "P0" | "P1" | "P2" | "P3";
 
