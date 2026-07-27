@@ -23,6 +23,7 @@ model User {
   features    Feature[]
   logAnalyses LogAnalysis[]
   testRuns    TestRun[]
+  manualStds  ManualStd[]
 
   @@map("users")
 }
@@ -121,6 +122,25 @@ model LogAnalysis {
 
   @@index([userId])
   @@map("log_analyses")
+}
+
+model ManualStd {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  featureName String   @map("feature_name")
+  slug        String
+  inputType   String   @map("input_type")
+  domain      String
+  testCases   Json     @map("test_cases")
+  coverage    Json
+  model       String
+  isMock      Boolean  @default(false) @map("is_mock")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("manual_stds")
 }
 
 /// Owned by connect-pg-simple (the express-session store in app.ts), not by

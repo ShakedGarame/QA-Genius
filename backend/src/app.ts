@@ -19,6 +19,7 @@ import { ResilientSessionStore } from "./lib/resilientSessionStore.js";
 
 import uploadRouter from "./routes/upload.js";
 import generateRouter from "./routes/generate.js";
+import generateStdRouter from "./routes/generateStd.js";
 import runRouter from "./routes/run.js";
 import analyzeRouter from "./routes/analyze.js";
 import testsRouter from "./routes/tests.js";
@@ -164,6 +165,7 @@ app.get("/health", (_req, res) => {
 const protectedRouter = express.Router();
 protectedRouter.use(uploadRouter);
 protectedRouter.use(generateRouter);
+protectedRouter.use(generateStdRouter);
 protectedRouter.use(runRouter);
 protectedRouter.use(analyzeRouter);
 protectedRouter.use(testsRouter);

@@ -4,7 +4,16 @@
 import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "./prisma.js";
-import type { FeatureGroup, FeatureMeta, InputType, TestFileInfo } from "./types/index.js";
+import type {
+  FeatureGroup,
+  FeatureMeta,
+  InputType,
+  TestFileInfo,
+  ManualStdRecord,
+  ManualStdTestCase,
+  StdCoverageRow,
+  StdDomain,
+} from "./types/index.js";
 
 export interface DbUser {
   id: string;
@@ -586,6 +595,84 @@ export async function getLogAnalysisById(
 
 export async function deleteLogAnalysis(userId: string, id: string): Promise<boolean> {
   const result = await prisma.logAnalysis.deleteMany({ where: { id, userId } });
+  return result.count > 0;
+}
+
+// ─── Manual STD (Standard Test Documentation) ─────────────────────────────────
+
+function mapManualStd(row: {
+  id: string;
+  userId: string;
+  featureName: string;
+  slug: string;
+  inputType: string;
+  domain: string;
+  testCases: Prisma.JsonValue;
+  coverage: Prisma.JsonValue;
+  model: string;
+  isMock: boolean;
+  createdAt: Date;
+}): ManualStdRecord {
+  return {
+    id: row.id,
+    user_id: row.userId,
+    feature_name: row.featureName,
+    slug: row.slug,
+    input_type: row.inputType as InputType,
+    domain: row.domain as StdDomain,
+    test_cases: row.testCases as unknown as ManualStdTestCase[],
+    coverage: row.coverage as unknown as StdCoverageRow[],
+    model: row.model,
+    is_mock: row.isMock,
+    created_at: row.createdAt.toISOString(),
+  };
+}
+
+export async function saveManualStd(
+  userId: string,
+  data: {
+    featureName: string;
+    slug: string;
+    inputType: InputType;
+    domain: StdDomain;
+    testCases: ManualStdTestCase[];
+    coverage: StdCoverageRow[];
+    model: string;
+    isMock: boolean;
+  }
+): Promise<ManualStdRecord> {
+  const row = await prisma.manualStd.create({
+    data: {
+      userId,
+      featureName: data.featureName,
+      slug: data.slug,
+      inputType: data.inputType,
+      domain: data.domain,
+      testCases: data.testCases as unknown as Prisma.InputJsonValue,
+      coverage: data.coverage as unknown as Prisma.InputJsonValue,
+      model: data.model,
+      isMock: data.isMock,
+    },
+  });
+
+  return mapManualStd(row);
+}
+
+export async function listManualStds(userId: string): Promise<ManualStdRecord[]> {
+  const rows = await prisma.manualStd.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map(mapManualStd);
+}
+
+export async function getManualStdById(userId: string, id: string): Promise<ManualStdRecord | null> {
+  const row = await prisma.manualStd.findFirst({ where: { id, userId } });
+  return row ? mapManualStd(row) : null;
+}
+
+export async function deleteManualStd(userId: string, id: string): Promise<boolean> {
+  const result = await prisma.manualStd.deleteMany({ where: { id, userId } });
   return result.count > 0;
 }
 

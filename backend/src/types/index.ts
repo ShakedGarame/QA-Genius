@@ -118,3 +118,69 @@ export interface FeatureGroup {
   meta: FeatureMeta;
   tests: TestFileInfo[];
 }
+
+// ─── Manual STD (Standard Test Documentation) generator ───────────────────────
+
+export type StdDomain = "fintech" | "general";
+
+export type StdCategory = "A" | "B" | "C" | "D" | "E" | "F";
+
+export type StdTestType =
+  | "UI"
+  | "Functional"
+  | "Security/RBAC"
+  | "Data Integrity"
+  | "API"
+  | "Negative"
+  | "Accessibility"
+  | "Integration";
+
+export type StdRiskLevel = "P0" | "P1" | "P2" | "P3";
+
+export interface ManualStdTestCase {
+  category: StdCategory;
+  id: string;
+  testType: StdTestType;
+  scenario: string;
+  preconditions: string[];
+  steps: string[];
+  expectedResult: string;
+  validationMethod: string;
+  riskLevel: StdRiskLevel;
+  riskImpact: string;
+}
+
+export interface StdCoverageRow {
+  requirement: string;
+  testCaseIds: string[];
+}
+
+export interface GenerateManualStdRequest {
+  prdText?: string;
+  swaggerContent?: string;
+  featureName: string;
+  inputType: InputType;
+  fileName?: string;
+}
+
+export interface GenerateManualStdResponse {
+  testCases: ManualStdTestCase[];
+  coverage: StdCoverageRow[];
+  model: string;
+  isMock: boolean;
+  domain: StdDomain;
+}
+
+export interface ManualStdRecord {
+  id: string;
+  user_id: string;
+  feature_name: string;
+  slug: string;
+  input_type: InputType;
+  domain: StdDomain;
+  test_cases: ManualStdTestCase[];
+  coverage: StdCoverageRow[];
+  model: string;
+  is_mock: boolean;
+  created_at: string;
+}

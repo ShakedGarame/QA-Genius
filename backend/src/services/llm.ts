@@ -1,7 +1,17 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { UserStory, GenerateTestsResponse, AnalyzeFailureResponse, McpLog, ParsedSwagger } from "../types/index.js";
+import {
+  UserStory,
+  GenerateTestsResponse,
+  AnalyzeFailureResponse,
+  McpLog,
+  ParsedSwagger,
+  ManualStdTestCase,
+  StdCoverageRow,
+  StdDomain,
+  GenerateManualStdResponse,
+} from "../types/index.js";
 
 // Server-level (env) keys — loaded once at startup
 const ENV_OPENAI_KEY = process.env.OPENAI_API_KEY;
@@ -51,7 +61,9 @@ You are a Principal QA Automation Architect with 10+ years of experience designi
 enterprise-grade test frameworks in Playwright and TypeScript for modern CI/CD pipelines. \
 You apply the playwright-e2e best practices: user-centric testing, resilient selectors, \
 isolation, and maximum readability. Tests are documentation — write them so a new team \
-member can understand the intent immediately.
+member can understand the intent immediately. You test behavior, not just markup: a test \
+that only checks that something is on the page, without ever driving the interaction that \
+makes it meaningful, is an incomplete test.
 
 ═══════════════════════════════════════════════
 LOCATOR STRATEGY — apply in this strict priority order:
@@ -83,6 +95,25 @@ ARRANGE → ACT → ASSERT (AAA) — mandatory in every test block:
   // Arrange — set preconditions, navigate, prepare test data
   // Act     — perform the SINGLE user action under test
   // Assert  — verify expected outcome with specific web-first matchers
+
+ACTIVE INTERACTIONS OVER PASSIVE CHECKS — this is a hard requirement, not a style preference:
+  - A test that only asserts an element is present (toBeVisible(), toBeInTheDocument-style checks)
+    with no preceding user action is a stub, not a test. It must be rejected in favor of a real flow.
+  - Every test that verifies a DYNAMIC UI state (a counter, a progress bar, a running total, a
+    badge count, an enabled/disabled toggle, a list that grows/shrinks, a price that recalculates)
+    MUST first perform the Act step that causes that state to change — click, fill, drag, select,
+    add-to-cart, submit — and only THEN assert on the resulting value. Asserting a static initial
+    state alone never satisfies this requirement.
+  - Example of the required shape (a "Progressive Spend Bar" style widget):
+      // Act — the interaction that should move the state
+      await cartPage.addItemToCart('SKU-123');
+      await cartPage.addItemToCart('SKU-456');
+      // Assert — verify the DERIVED state changed as a result, not just that the bar exists
+      await expect(cartPage.spendProgressBar).toHaveAttribute('aria-valuenow', '42');
+      await expect(cartPage.spendProgressBar).toHaveText(/\\$42/);
+  - Static-only assertions (toBeVisible() with nothing acted on beforehand) are acceptable ONLY for
+    truly static content (page headers, static labels) — never for anything the PRD describes as
+    reactive, dynamic, personalized, or state-dependent.
 
 NAMING CONVENTIONS:
   - test.describe('FeatureName', () => { ... })
@@ -125,6 +156,27 @@ NETWORK MOCKING — use page.route() to isolate tests from flaky APIs:
   await page.getByRole('button', { name: 'Submit' }).click();
   await responsePromise;
 
+MANDATORY EDGE & FALLBACK CASES — non-negotiable when the PRD describes any of the following:
+  fallback behavior, graceful degradation, error handling, retry logic, timeout behavior,
+  offline/network-failure handling, or performance/SLA requirements tied to an API call.
+  When ANY of those are present, you MUST generate at least one dedicated test that simulates
+  the failure using page.route() to intercept the relevant endpoint and force an error response,
+  then asserts the fallback UI actually appears. Do not skip this — it is as mandatory as the
+  happy-path test, and it belongs in its own test() block, clearly named (e.g.
+  "should show fallback UI when the offers API returns a 500").
+  Pattern to follow:
+  await page.route('**/v1/offers', route => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'Internal Server Error' }),
+  }));
+  await page.goto('/offers'); // or trigger whatever action calls the endpoint
+  // Assert the documented fallback/graceful-degradation UI is shown, not the crashed/blank state:
+  await expect(page.getByText(/something went wrong|unable to load|try again/i)).toBeVisible();
+  Also cover, wherever the PRD implies them: empty-state responses (200 with an empty payload),
+  slow responses (page.route with a delayed route.fulfill, when the PRD calls out a loading state
+  or performance requirement), and boundary/invalid input on user-editable fields.
+
 PARAMETERIZED TESTS — use for role/permission or data-driven scenarios:
   for (const { role, canDelete } of [
     { role: 'admin', canDelete: true },
@@ -143,11 +195,20 @@ ANTI-PATTERNS — NEVER generate these:
   ✗ Tests that call real third-party APIs — mock external services with page.route()
   ✗ Placeholder comments like "// TODO: implement this"
   ✗ Giant test files covering multiple unrelated features
+  ✗ Tests that assert only toBeVisible()/element-presence on a dynamic element with no Act step
+  ✗ Single-assertion "smoke stub" tests standing in for real coverage — a feature with dynamic
+    state, personalization, or an API dependency needs a full suite (happy path, at least one
+    interaction-driven state-change test, and the mandatory fallback/error test where applicable)
+  ✗ Skipping the fallback/error-simulation test when the PRD mentions fallback, error handling,
+    retries, timeouts, or performance requirements
 ═══════════════════════════════════════════════
 OUTPUT RULES:
   - Return ONLY raw TypeScript code.
   - NO markdown code fences (\`\`\`), NO introductory text, NO trailing explanations.
-  - Generate COMPLETE, runnable code — no stubs, no TODOs.`;
+  - Generate COMPLETE, runnable code — no stubs, no TODOs.
+  - Each user story should produce a RICH test.describe() suite: a happy-path test that performs
+    the real interaction and asserts on the resulting state, plus every edge, fallback, and error
+    case implied by the PRD for that story. Do not collapse a story into a single assertion.`;
 
 // ── Skill 2: API Test Generation (Swagger/OpenAPI → Playwright request) ───────
 const API_TEST_GENERATION_SYSTEM = `\
@@ -259,7 +320,12 @@ Return ONLY the structured Markdown. NEVER output raw JSON. NEVER omit a section
 
 // ─── OpenAI ───────────────────────────────────────────────────────────────────
 
-async function callOpenAI(systemPrompt: string, userPrompt: string, apiKeyOverride?: string): Promise<string> {
+async function callOpenAI(
+  systemPrompt: string,
+  userPrompt: string,
+  apiKeyOverride?: string,
+  maxTokens = 3000
+): Promise<string> {
   const { default: OpenAI } = await import("openai");
   const key = apiKeyOverride || ENV_OPENAI_KEY;
   const client = new OpenAI({ apiKey: key });
@@ -271,7 +337,7 @@ async function callOpenAI(systemPrompt: string, userPrompt: string, apiKeyOverri
       { role: "user", content: userPrompt },
     ],
     temperature: 0.2,
-    max_tokens: 3000,
+    max_tokens: maxTokens,
   });
 
   return response.choices[0]?.message?.content ?? "";
@@ -279,13 +345,13 @@ async function callOpenAI(systemPrompt: string, userPrompt: string, apiKeyOverri
 
 // ─── Anthropic ────────────────────────────────────────────────────────────────
 
-async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<string> {
+async function callAnthropic(systemPrompt: string, userPrompt: string, maxTokens = 3000): Promise<string> {
   const Anthropic = await import("@anthropic-ai/sdk");
   const client = new Anthropic.default({ apiKey: ENV_ANTHROPIC_KEY });
 
   const response = await client.messages.create({
     model: ANTHROPIC_MODEL,
-    max_tokens: 3000,
+    max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
   });
@@ -520,7 +586,7 @@ Apply all locator, structure, and naming rules from your system instructions.
 
 ═══════════════════════════════════════════════
 ## Product Requirements Document (PRD)
-${prdText.slice(0, 3500)}
+${prdText.slice(0, 12000)}
 
 ## Extracted User Stories (${userStories.length} total)
 ${storiesBlock}
@@ -530,7 +596,15 @@ Requirements:
 - Generate one test.describe() block per user story.
 - Apply the AAA pattern (Arrange/Act/Assert) in every test.
 - Use only robust locators (getByRole, getByLabel, getByText, getByTestId).
-- Do NOT use page.waitForTimeout() anywhere.`;
+- Do NOT use page.waitForTimeout() anywhere.
+- Re-read the PRD above specifically for: dynamic/reactive UI elements (counters, progress bars,
+  totals, badges) that must be driven by a real interaction before asserting on them; and any
+  fallback, error-handling, retry, timeout, or performance requirement tied to an API call. Every
+  such element or requirement you find MUST produce its own test — an interaction-driven
+  state-change test for dynamic UI, and a page.route()-based failure-simulation test for any
+  fallback/error/performance requirement. Do not summarize these as a single toBeVisible() check.
+- Each story's test.describe() block should read as a small suite, not a single assertion: happy
+  path (with real interactions) + relevant edge cases + the fallback/error test where applicable.`;
 
   let code: string;
   let model: string;
@@ -1200,5 +1274,262 @@ Instructions:
       category: "unknown",
       isMock: false,
     };
+  }
+}
+
+// ── Skill 6: Manual STD Generation (PRD/Swagger → Standard Test Documentation) ──
+// Ports the "Deep QA Architect" /std protocol's analytical rigor (hidden-requirement
+// detection, mandatory category coverage, BVA/negative/data-integrity/security
+// methodologies) into a strict-JSON contract the frontend renders as a table.
+
+const FINTECH_KEYWORDS =
+  /\b(payment|checkout|gateway|refund|webhook|merchant of record|MoR|chargeback|billing)\b/i;
+
+function detectStdDomain(rawText: string): StdDomain {
+  return FINTECH_KEYWORDS.test(rawText) ? "fintech" : "general";
+}
+
+const MANUAL_STD_BASE_SYSTEM = `\
+You are a Deep QA Architect writing professional Standard Test Documentation (STD) for a \
+software feature. Before writing any test case, analyze the input for Hidden Requirements \
+(e.g. a "Delete" action implies tests for Undo, Permissions, and Database Integrity), \
+potential failure points in the described logic, and edge cases not explicitly mentioned.
+
+═══════════════════════════════════════════════
+MANDATORY CATEGORY COVERAGE — every STD must include all six categories below, with at
+least 2-3 test cases per category:
+  A — Dashboard / Entry Point   — alert visibility, count accuracy, persistence, refresh behavior
+  B — Detail View / Side Panel — field accuracy, stale data, owner fallback, panel open/close
+  C — Core Action               — happy path, post-action state, feedback messages
+  D — Edge Cases / BVA          — max lengths, empty fields, concurrent actions, network interruptions
+  E — Data Integrity            — DB ↔ UI field-level comparison; count consistency
+  F — Security                  — RBAC (UI + API layers), JWT expiry, IDOR / multi-tenant isolation,
+                                   session invalidation
+
+ADVANCED METHODOLOGIES — apply all four across the categories above:
+  BVA (Boundary Value Analysis)     — test at limits: max characters, 0, -1, empty, null, max integers
+  Negative Testing                  — invalid tokens, network interruptions, expired sessions,
+                                       concurrent duplicate actions
+  Data Integrity                    — for every value displayed in the UI, describe the companion
+                                       SQL query that verifies the DB holds the exact same value;
+                                       verify counts before/after actions, status field updates,
+                                       audit metadata (user, timestamp, action)
+  Security                          — RBAC matrix across every role (Viewer / Owner / Admin) against
+                                       every sensitive action at both UI and API layers; expired/
+                                       tampered JWT, post-logout token replay, session expiry
+                                       mid-action; IDOR cross-tenant resource access attempts
+
+COVERAGE REQUIREMENT — ensure 1:1 mapping between every stated feature requirement and at
+least one test case; return this mapping as the "coverage" array.
+
+LANGUAGE: Professional, dry, technical English throughout — never casual or informal phrasing.
+═══════════════════════════════════════════════
+OUTPUT CONTRACT — return ONLY a single raw JSON object with EXACTLY this shape (no markdown
+fences, no commentary before or after):
+{
+  "testCases": [
+    {
+      "category": "A" | "B" | "C" | "D" | "E" | "F",
+      "id": "TC-01",
+      "testType": "UI" | "Functional" | "Security/RBAC" | "Data Integrity" | "API" | "Negative" | "Accessibility" | "Integration",
+      "scenario": "Professional description, e.g. 'Verify system behavior under concurrent API requests'",
+      "preconditions": ["Exact environment state, data setup, user permissions — one item per line"],
+      "steps": ["Granular, numbered, step-by-step execution instructions — one item per array entry"],
+      "expectedResult": "Binary success criteria — exactly what should happen",
+      "validationMethod": "How to verify the test passed, e.g. SQL Query | UI Check | Network Tab | API Response (curl/Postman) | Browser Console | Audit Log",
+      "riskLevel": "P0" | "P1" | "P2" | "P3",
+      "riskImpact": "One-line impact analysis justifying the risk level"
+    }
+  ],
+  "coverage": [
+    { "requirement": "The specific PRD/spec requirement being covered", "testCaseIds": ["TC-01", "TC-04"] }
+  ]
+}
+
+RISK LEVELS: P0 = critical (system crash, data loss, security breach) · P1 = high (core
+feature broken, no workaround) · P2 = medium (degraded experience, workaround exists) ·
+P3 = low (cosmetic, edge case, minor UX issue).
+
+IDs are sequential (TC-01, TC-02, …) and never reused. Every test case's "steps" must be
+concrete and executable by a manual tester with no other context.`;
+
+const MANUAL_STD_FINTECH_ADDENDUM = `
+
+═══════════════════════════════════════════════
+FINTECH / PAYMENT DOMAIN DETECTED — the input references payments, checkout, gateways,
+refunds, webhooks, or Merchant of Record (MoR) logic. In addition to the six mandatory
+categories above, you MUST include dedicated test cases (place them under whichever of
+categories C/D/E/F fits best) covering every one of the following:
+  - Idempotency        — retrying the same charge/refund request (e.g. via an Idempotency-Key
+                          header or client-generated request ID) must NEVER create a duplicate
+                          charge, duplicate refund, or duplicate order.
+  - Async Webhook Signatures — incoming payment-provider webhooks must have their signature
+                          (e.g. HMAC) verified before being trusted; include a negative test for
+                          a tampered/invalid signature and a replay-attack (duplicate event ID) test.
+  - 504 Timeouts & Retries — the gateway/upstream payment provider times out or returns 502/504;
+                          verify retry-with-backoff behavior and that the user is never charged
+                          twice as a result of a client-side retry after a timeout.
+  - Currency / Localization — multi-currency amounts round correctly (no floating-point drift),
+                          and are displayed in the locale-appropriate format.
+  - Tax / VAT Compliance — tax/VAT is computed from the correct jurisdiction when the billing
+                          address and the request's IP-derived country disagree; include a test
+                          asserting which one the system is documented to prioritize.
+These are non-negotiable additions on top of, not instead of, the six mandatory categories.`;
+
+function buildManualStdSystemPrompt(rawText: string): { prompt: string; domain: StdDomain } {
+  const domain = detectStdDomain(rawText);
+  return {
+    prompt: domain === "fintech" ? MANUAL_STD_BASE_SYSTEM + MANUAL_STD_FINTECH_ADDENDUM : MANUAL_STD_BASE_SYSTEM,
+    domain,
+  };
+}
+
+function buildMockManualStd(featureName: string, domain: StdDomain): { testCases: ManualStdTestCase[]; coverage: StdCoverageRow[] } {
+  const testCases: ManualStdTestCase[] = [
+    {
+      category: "A",
+      id: "TC-01",
+      testType: "UI",
+      scenario: `Verify ${featureName} entry point renders with accurate initial state`,
+      preconditions: ["User is authenticated with a standard role", `${featureName} module is enabled for the account`],
+      steps: [`Navigate to the ${featureName} page`, "Observe the entry point / dashboard element"],
+      expectedResult: "The entry point renders with the correct count/status matching the seeded test data",
+      validationMethod: "UI Check",
+      riskLevel: "P2",
+      riskImpact: "Incorrect entry-point data misleads users on first impression of the feature",
+    },
+    {
+      category: "C",
+      id: "TC-02",
+      testType: "Functional",
+      scenario: `Verify the core action of ${featureName} completes successfully (happy path)`,
+      preconditions: ["User has permission to perform the action", "Required upstream data exists"],
+      steps: ["Trigger the core action", "Observe the resulting confirmation/feedback message"],
+      expectedResult: "The action completes and the UI reflects the new state with a success message",
+      validationMethod: "UI Check",
+      riskLevel: "P1",
+      riskImpact: "A broken core action blocks the primary user flow with no workaround",
+    },
+    {
+      category: "D",
+      id: "TC-03",
+      testType: "Negative",
+      scenario: `Verify ${featureName} rejects an invalid/boundary input`,
+      preconditions: ["User is on the relevant input form"],
+      steps: ["Submit an empty/oversized/malformed value in the primary input field", "Observe the validation response"],
+      expectedResult: "A clear validation error is shown and no partial state is persisted",
+      validationMethod: "UI Check",
+      riskLevel: "P2",
+      riskImpact: "Silent acceptance of invalid input can corrupt downstream data",
+    },
+    {
+      category: "E",
+      id: "TC-04",
+      testType: "Data Integrity",
+      scenario: `Verify ${featureName}'s displayed value matches the persisted database record`,
+      preconditions: ["A record exists for this feature with a known value"],
+      steps: ["Load the feature's detail view", "Query the backing table directly for the same record"],
+      expectedResult: "The UI value is byte-for-byte identical to the database value",
+      validationMethod: "SQL Query",
+      riskLevel: "P1",
+      riskImpact: "A UI/DB mismatch means users are acting on stale or incorrect information",
+    },
+    {
+      category: "F",
+      id: "TC-05",
+      testType: "Security/RBAC",
+      scenario: `Verify a Viewer-role user cannot perform the restricted action in ${featureName}`,
+      preconditions: ["A user with Viewer role is authenticated", "A user with Owner role exists for comparison"],
+      steps: ["Attempt the restricted action as Viewer via the UI", "Attempt the same action directly against the API"],
+      expectedResult: "Both attempts are rejected with 403 Forbidden and no state change occurs",
+      validationMethod: "API Response (curl/Postman)",
+      riskLevel: "P0",
+      riskImpact: "A broken RBAC boundary allows privilege escalation across the entire feature",
+    },
+  ];
+
+  if (domain === "fintech") {
+    testCases.push({
+      category: "D",
+      id: "TC-06",
+      testType: "Negative",
+      scenario: "Verify retrying a charge request with the same Idempotency-Key never creates a duplicate charge",
+      preconditions: ["A valid payment method is on file", "An Idempotency-Key header is supported by the endpoint"],
+      steps: [
+        "Submit a charge request with a fixed Idempotency-Key",
+        "Immediately resubmit the identical request with the same Idempotency-Key",
+        "Query the payment ledger for this customer",
+      ],
+      expectedResult: "Exactly one charge exists; the second response returns the original charge result, not a new charge",
+      validationMethod: "SQL Query",
+      riskLevel: "P0",
+      riskImpact: "Duplicate charges directly harm customers and trigger chargebacks/compliance exposure",
+    });
+  }
+
+  const coverage: StdCoverageRow[] = [
+    { requirement: `${featureName} entry point is visible and accurate`, testCaseIds: ["TC-01"] },
+    { requirement: `${featureName} core action completes successfully`, testCaseIds: ["TC-02"] },
+    { requirement: "Invalid input is rejected with a clear error", testCaseIds: ["TC-03"] },
+    { requirement: "UI state matches the database record", testCaseIds: ["TC-04"] },
+    { requirement: "Restricted actions are blocked for unauthorized roles", testCaseIds: ["TC-05"] },
+  ];
+  if (domain === "fintech") {
+    coverage.push({ requirement: "Duplicate charge/refund requests are prevented (idempotency)", testCaseIds: ["TC-06"] });
+  }
+
+  return { testCases, coverage };
+}
+
+export async function generateManualStd(
+  rawText: string,
+  featureName: string,
+  options: { openaiKey?: string } = {}
+): Promise<GenerateManualStdResponse> {
+  const { openaiKey, isMock } = resolveKeys(options);
+  const { prompt: systemPrompt, domain } = buildManualStdSystemPrompt(rawText);
+
+  if (isMock) {
+    await new Promise((r) => setTimeout(r, 1800));
+    const { testCases, coverage } = buildMockManualStd(featureName, domain);
+    return { testCases, coverage, model: "mock", isMock: true, domain };
+  }
+
+  const userPrompt = `\
+Write a complete Standard Test Documentation (STD) for the feature described below.
+Apply the mandatory category coverage, methodologies, and JSON output contract from your
+system instructions exactly.
+
+═══════════════════════════════════════════════
+## Feature Name
+${featureName}
+
+## Source Document (PRD / Swagger)
+${rawText.slice(0, 12000)}
+═══════════════════════════════════════════════
+Return ONLY the JSON object defined in your system instructions — no extra text, no
+markdown fences.`;
+
+  // STD output is a large structured JSON payload (6 mandatory categories × 2-3 cases each,
+  // plus the FinTech addendum and a coverage table) — the default 3000-token budget shared
+  // by the other skills routinely truncates it mid-object, so this call gets a larger one.
+  const STD_MAX_TOKENS = 6000;
+
+  let raw: string;
+  let model: string;
+  if (openaiKey) {
+    raw = await callOpenAI(systemPrompt, userPrompt, openaiKey, STD_MAX_TOKENS);
+    model = OPENAI_MODEL;
+  } else {
+    raw = await callAnthropic(systemPrompt, userPrompt, STD_MAX_TOKENS);
+    model = ANTHROPIC_MODEL;
+  }
+
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { testCases: ManualStdTestCase[]; coverage: StdCoverageRow[] };
+    return { testCases: parsed.testCases ?? [], coverage: parsed.coverage ?? [], model, isMock: false, domain };
+  } catch {
+    throw new Error("Failed to parse STD response from the model. Please try again.");
   }
 }

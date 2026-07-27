@@ -4,18 +4,20 @@ import {
   Play, Loader2, Sparkles, FileCode2, AlertCircle,
   CheckCircle2, RotateCcw, Save, Upload, FileText,
   Code2, Globe, Tag, X, Square, ChevronUp,
+  Bot, ClipboardList, History as HistoryIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import StoryPanel from "../../components/qa-genius/StoryPanel";
 import ExecutionConsole from "../../components/qa-genius/ExecutionConsole";
 import ArtifactsGallery from "../../components/qa-genius/ArtifactsGallery";
 import FailureAnalyzer from "../../components/qa-genius/FailureAnalyzer";
+import ManualStdTable from "../../components/qa-genius/ManualStdTable";
 import { useTestRunner } from "../../hooks/useTestRunner";
 import { useAuth } from "../../hooks/useAuth";
 import { buildOpenAIKeyHeaders, readOpenAIKeyForRequest } from "../../lib/apiKeys";
 import { routeFailureLogsToAnalyzer, getActionableFailureLogs, readPendingGeneratorRun, type RunInGeneratorPayload } from "../../lib/cloudRunner";
 import SelfHealModal from "../../components/qa-genius/SelfHealModal";
-import { ParsedPrd, GenerateTestsResult, UserStory, InputType } from "../../types";
+import { ParsedPrd, GenerateTestsResult, UserStory, InputType, GenerateManualStdResult, ManualStdRecord } from "../../types";
 import { MOCK_CODE_MAP } from "../../data/mockData";
 import { SidebarPanel, PanelBody, EmptyState } from "../../components/ui/layout";
 
@@ -106,6 +108,56 @@ function FeatureNameInput({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Generator Mode Toggle (Playwright Automation vs Manual STD) ─────────────
+
+type GeneratorMode = "playwright" | "manual-std";
+
+function GeneratorModeToggle({
+  value, onChange,
+}: {
+  value: GeneratorMode;
+  onChange: (v: GeneratorMode) => void;
+}) {
+  return (
+    <div>
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+        <Sparkles className="w-3 h-3" /> Generator Mode
+      </label>
+      <div className="flex gap-1 p-1 bg-surface-700 rounded-lg">
+        <button
+          onClick={() => onChange("playwright")}
+          className={clsx(
+            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
+            value === "playwright"
+              ? "bg-sky-600 text-white shadow"
+              : "text-slate-400 hover:text-slate-200"
+          )}
+        >
+          <Bot className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Playwright Automation</span>
+        </button>
+        <button
+          onClick={() => onChange("manual-std")}
+          className={clsx(
+            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
+            value === "manual-std"
+              ? "bg-emerald-600 text-white shadow"
+              : "text-slate-400 hover:text-slate-200"
+          )}
+        >
+          <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Manual STD Generator</span>
+        </button>
+      </div>
+      <p className="text-[10px] text-slate-600 mt-1">
+        {value === "manual-std"
+          ? "Generates a manual Standard Test Documentation table with domain-aware coverage"
+          : "Generates executable Playwright automation code"}
+      </p>
     </div>
   );
 }
@@ -346,6 +398,12 @@ export default function TestGeneratorTab() {
   const [featureNameSaved, setFeatureNameSaved] = useState(false);
   const [featureNameError, setFeatureNameError] = useState("");
   const [inputType, setInputType] = useState<InputType>("prd");
+  const [generatorMode, setGeneratorMode] = useState<GeneratorMode>("playwright");
+  const [stdResult, setStdResult] = useState<GenerateManualStdResult | null>(null);
+  const [isGeneratingStd, setIsGeneratingStd] = useState(false);
+  const [stdError, setStdError] = useState<string | null>(null);
+  const [savedStds, setSavedStds] = useState<ManualStdRecord[]>([]);
+  const [stdDropdownOpen, setStdDropdownOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("configure");
   const [editedCode, setEditedCode] = useState("");
   const [savedAs, setSavedAs] = useState<string | null>(null);
@@ -550,6 +608,112 @@ export default function TestGeneratorTab() {
     }
   };
 
+  const fetchSavedStds = useCallback(async () => {
+    try {
+      const res = await fetch("/api/manual-std", { credentials: "include" });
+      if (!res.ok) return;
+      const json = await res.json();
+      setSavedStds(json.stds ?? []);
+    } catch {
+      // Non-critical — the dropdown just stays empty
+    }
+  }, []);
+
+  useEffect(() => {
+    if (generatorMode === "manual-std") void fetchSavedStds();
+  }, [generatorMode, fetchSavedStds]);
+
+  const handleLoadSavedStd = async (id: string) => {
+    setStdDropdownOpen(false);
+    try {
+      const res = await fetch(`/api/manual-std/${encodeURIComponent(id)}`, { credentials: "include" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to load STD");
+      const std = json.std as ManualStdRecord;
+      setFeatureName(std.feature_name);
+      setFeatureNameSaved(true);
+      setFeatureNameError("");
+      setStdResult({
+        testCases: std.test_cases,
+        coverage: std.coverage,
+        model: std.model,
+        isMock: std.is_mock,
+        domain: std.domain,
+      });
+      setStdError(null);
+      setStage("generated");
+    } catch (e) {
+      setStdError(e instanceof Error ? e.message : "Failed to load STD");
+    }
+  };
+
+  const handleGenerateStd = async () => {
+    if (!featureName.trim()) {
+      setFeatureNameError("Feature Name is required");
+      return;
+    }
+    if (!featureNameSaved) {
+      setFeatureNameError("Please save the Feature Name first");
+      return;
+    }
+    setFeatureNameError("");
+
+    const userKey = readOpenAIKeyForRequest();
+    if (!userKey) {
+      setStdError("OpenAI API key missing. Open Settings, paste your sk-… key (it saves automatically), then try again.");
+      return;
+    }
+
+    if (!pendingInput) {
+      setStdError("Please provide a PRD or Swagger file / text first");
+      return;
+    }
+
+    setStage("generated");
+    setIsGeneratingStd(true);
+    setStdError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("featureName", featureName.trim());
+      formData.append("inputType", inputType);
+
+      if (pendingInput.file) {
+        formData.append("file", pendingInput.file);
+      } else if (inputType === "swagger" && pendingInput.swaggerContent) {
+        formData.append("swaggerContent", pendingInput.swaggerContent);
+      } else if (pendingInput.prdText) {
+        formData.append("prdText", pendingInput.prdText);
+      } else {
+        setStdError("Please provide input first");
+        return;
+      }
+
+      formData.append("openaiApiKey", userKey);
+
+      const res = await fetch("/api/generate-std", {
+        method: "POST",
+        credentials: "include",
+        headers: buildOpenAIKeyHeaders(),
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "STD generation failed");
+
+      if (json.data?.isMock) {
+        throw new Error("Server returned demo mode — your API key was not received. Re-paste it in Settings and try again.");
+      }
+
+      setStdResult(json.data as GenerateManualStdResult);
+      setStage("generated");
+      void fetchSavedStds();
+    } catch (e) {
+      setStdError(e instanceof Error ? e.message : "STD generation failed");
+    } finally {
+      setIsGeneratingStd(false);
+    }
+  };
+
   const handleRun = async () => {
     const code = editedCode || genResult?.code || "";
     if (!code) return;
@@ -591,6 +755,8 @@ export default function TestGeneratorTab() {
     setFeatureSlug(null);
     setGenResult(null);
     setGenError(null);
+    setStdResult(null);
+    setStdError(null);
     setPendingInput(null);
     setUserStories([]);
     setFeatureName("");
@@ -601,9 +767,11 @@ export default function TestGeneratorTab() {
   const showExecutionPanel = stage === "executed" || isRunning;
   const showFailureAnalyzer = showExecutionPanel && runResult?.status === "failed" && !isRunning;
 
-  const stageList: Stage[] = ["configure", "generated", "executed"];
+  const stageList: Stage[] = generatorMode === "manual-std" ? ["configure", "generated"] : ["configure", "generated", "executed"];
   const stageIdx = stageList.indexOf(stage);
-  const hasOutputPane = Boolean(genResult || isGenerating);
+  const hasOutputPane = generatorMode === "manual-std"
+    ? Boolean(stdResult || isGeneratingStd)
+    : Boolean(genResult || isGenerating);
   const [mobileConfigOpen, setMobileConfigOpen] = useState(true);
 
   useEffect(() => {
@@ -646,9 +814,52 @@ export default function TestGeneratorTab() {
             error={featureNameError}
           />
 
+          {/* Generator Mode — only show once feature name is saved */}
+          {featureNameSaved && (
+          <GeneratorModeToggle
+            value={generatorMode}
+            onChange={(v) => {
+              setGeneratorMode(v);
+              setGenResult(null);
+              setStdResult(null);
+              setGenError(null);
+              setStdError(null);
+              setStage("configure");
+              resetExecutionState();
+            }}
+          />
+          )}
+
           {/* Input Type — only show once feature name is saved */}
           {featureNameSaved && (
           <InputTypeToggle value={inputType} onChange={(v) => { setInputType(v); setPendingInput(null); setUserStories([]); }} />
+          )}
+
+          {/* Saved STDs dropdown — only in Manual STD mode */}
+          {featureNameSaved && generatorMode === "manual-std" && savedStds.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setStdDropdownOpen((v) => !v)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-surface-700 hover:bg-surface-600 text-slate-300 transition-colors"
+              >
+                <span className="flex items-center gap-1.5"><HistoryIcon className="w-3.5 h-3.5" /> Saved STDs ({savedStds.length})</span>
+                <ChevronUp className={clsx("w-3.5 h-3.5 transition-transform", !stdDropdownOpen && "rotate-180")} />
+              </button>
+              {stdDropdownOpen && (
+                <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto bg-surface-700 border border-surface-500 rounded-lg shadow-xl">
+                  {savedStds.map((std) => (
+                    <button
+                      key={std.id}
+                      onClick={() => handleLoadSavedStd(std.id)}
+                      className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-surface-600 hover:text-white transition-colors truncate"
+                    >
+                      {std.feature_name} <span className="text-slate-500">· {new Date(std.created_at).toLocaleDateString()}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Input area — only show once feature name is saved */}
@@ -701,20 +912,31 @@ export default function TestGeneratorTab() {
             </div>
           )}
           <div className="flex gap-2">
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating}
-              className={clsx(
-                "flex-1 flex items-center justify-center gap-2 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
-                inputType === "swagger"
-                  ? "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500"
-                  : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500"
-              )}
-            >
-              {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {isGenerating ? "Generating…" : inputType === "swagger" ? "Generate API Tests" : "Generate UI Tests"}
-            </button>
-            {genResult && (
+            {generatorMode === "manual-std" ? (
+              <button
+                onClick={handleGenerateStd}
+                disabled={isGeneratingStd}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500"
+              >
+                {isGeneratingStd ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
+                {isGeneratingStd ? "Generating STD…" : "Generate Manual STD"}
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className={clsx(
+                  "flex-1 flex items-center justify-center gap-2 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+                  inputType === "swagger"
+                    ? "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500"
+                    : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500"
+                )}
+              >
+                {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {isGenerating ? "Generating…" : inputType === "swagger" ? "Generate API Tests" : "Generate UI Tests"}
+              </button>
+            )}
+            {(genResult || stdResult) && (
               <button
                 onClick={handleReset}
                 title="Start over"
@@ -724,9 +946,9 @@ export default function TestGeneratorTab() {
               </button>
             )}
           </div>
-          {genError && (
+          {(generatorMode === "manual-std" ? stdError : genError) && (
             <p className="text-xs text-red-400 flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5" /> {genError}
+              <AlertCircle className="w-3.5 h-3.5" /> {generatorMode === "manual-std" ? stdError : genError}
             </p>
           )}
           </div>
@@ -762,6 +984,45 @@ export default function TestGeneratorTab() {
             )}
           </button>
         )}
+        {generatorMode === "manual-std" ? (
+          <>
+            {!stdResult && !isGeneratingStd && (
+              <EmptyState
+                icon={ClipboardList}
+                accent="emerald"
+                title="No STD generated yet"
+                description="Enter a feature name, provide a PRD or Swagger spec, and click Generate Manual STD to create a Standard Test Documentation table."
+                hint="Follow the steps in the left panel: Configure → Generate."
+              />
+            )}
+
+            {isGeneratingStd && (
+              <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4">
+                <div className="w-14 h-14 rounded-full border flex items-center justify-center bg-emerald-500/10 border-emerald-500/20">
+                  <ClipboardList className="w-6 h-6 animate-pulse text-emerald-400" />
+                </div>
+                <div>
+                  <p className="text-slate-200 font-medium">Generating Standard Test Documentation…</p>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Detecting hidden requirements · Applying mandatory category coverage · Domain adaptation
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {stdResult && !isGeneratingStd && (
+              <ManualStdTable
+                testCases={stdResult.testCases}
+                coverage={stdResult.coverage}
+                featureName={featureName.trim() || "feature"}
+                domain={stdResult.domain}
+                model={stdResult.model}
+                isMock={stdResult.isMock}
+              />
+            )}
+          </>
+        ) : (
+        <>
         {!genResult && !isGenerating && (
           <EmptyState
             icon={FileCode2}
@@ -918,6 +1179,8 @@ export default function TestGeneratorTab() {
               />
             )}
           </>
+        )}
+        </>
         )}
       </div>
 
