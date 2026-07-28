@@ -1,23 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
-  CheckCircle2,
-  Clock,
+  ClipboardList,
   RefreshCw,
   Square,
   Target,
   TrendingUp,
   Zap,
   PlayCircle,
-  XCircle,
   ChevronUp,
   ChevronDown,
   ChevronsUpDown,
 } from "lucide-react";
 import clsx from "clsx";
 import { cancelTestRun, fetchDashboardStats } from "../../lib/testRuns";
+import { useManualStds } from "../../hooks/useManualStds";
 import {
-  formatDuration,
   formatDashboardDuration,
   formatIsraeliDateTime,
   getRunStatusDisplay,
@@ -101,6 +99,92 @@ function SortableHeader({
   );
 }
 
+interface DayBucket {
+  label: string;
+  passed: number;
+  failed: number;
+}
+
+/** Groups completed runs by calendar day (PASSED/FAILED only), ascending, capped to the most recent 14 days that actually have data. */
+function bucketRunsByDay(runs: TestRunRecord[]): DayBucket[] {
+  const byDay = new Map<string, DayBucket>();
+  for (const run of runs) {
+    if (run.status !== "PASSED" && run.status !== "FAILED") continue;
+    const d = new Date(run.created_at);
+    const key = d.toISOString().slice(0, 10);
+    if (!byDay.has(key)) {
+      byDay.set(key, { label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }), passed: 0, failed: 0 });
+    }
+    const bucket = byDay.get(key)!;
+    if (run.status === "PASSED") bucket.passed += 1;
+    else bucket.failed += 1;
+  }
+  return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-14).map(([, v]) => v);
+}
+
+function PassFailTrendChart({ runs }: { runs: TestRunRecord[] }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const days = useMemo(() => bucketRunsByDay(runs), [runs]);
+
+  if (days.length === 0) {
+    return (
+      <p className="text-sm text-slate-500 py-8 text-center">
+        Not enough completed runs yet to chart a trend.
+      </p>
+    );
+  }
+
+  const maxTotal = Math.max(1, ...days.map((d) => d.passed + d.failed));
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-4 text-xs text-slate-400">
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 flex-shrink-0" /> Passed</span>
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-500 flex-shrink-0" /> Failed</span>
+      </div>
+
+      <div className="flex items-end gap-1.5 sm:gap-2 h-40">
+        {days.map((d, i) => {
+          const total = d.passed + d.failed;
+          const barHeightPct = total === 0 ? 2 : Math.max((total / maxTotal) * 100, 6);
+          const passedSharePct = total === 0 ? 0 : (d.passed / total) * 100;
+          return (
+            <div
+              key={i}
+              className="flex-1 h-full flex flex-col justify-end relative"
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
+            >
+              {hovered === i && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 whitespace-nowrap rounded-lg border border-surface-600 bg-surface-900 px-2.5 py-1.5 text-[11px] shadow-xl">
+                  <p className="text-slate-300 font-medium">{d.label}</p>
+                  <p className="text-emerald-400">{d.passed} passed</p>
+                  <p className="text-red-400">{d.failed} failed</p>
+                </div>
+              )}
+              <div
+                className="w-full rounded-t-sm bg-surface-700/40 flex flex-col-reverse overflow-hidden transition-all"
+                style={{ height: `${barHeightPct}%` }}
+              >
+                <div className="w-full bg-emerald-500" style={{ height: `${passedSharePct}%` }} />
+                <div className="w-full bg-red-500" style={{ height: `${100 - passedSharePct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex gap-1.5 sm:gap-2 mt-1.5">
+        {days.map((d, i) => (
+          <span key={i} className="flex-1 text-center text-[9px] text-slate-600 truncate">
+            {d.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardTab() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,6 +194,9 @@ export default function DashboardTab() {
   const [sortKey, setSortKey] = useState<SortKey>("when");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { stds, refresh: refreshStds } = useManualStds();
+
+  useEffect(() => { refreshStds(); }, [refreshStds]);
 
   const handleSort = useCallback((key: SortKey) => {
     if (key === sortKey) {
@@ -138,6 +225,8 @@ export default function DashboardTab() {
     void load();
     const onChanged = () => { void load(true); };
     window.addEventListener("qa-genius:test-runs-changed", onChanged);
+    const onStdsChanged = () => { refreshStds(); };
+    window.addEventListener("qa-genius:manual-std-changed", onStdsChanged);
     const onFocus = () => { void load(true); };
     window.addEventListener("focus", onFocus);
     const onVisibility = () => {
@@ -147,11 +236,12 @@ export default function DashboardTab() {
     pollRef.current = setInterval(() => { void load(true); }, 30_000);
     return () => {
       window.removeEventListener("qa-genius:test-runs-changed", onChanged);
+      window.removeEventListener("qa-genius:manual-std-changed", onStdsChanged);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [load]);
+  }, [load, refreshStds]);
 
   const handleStopRun = useCallback(async (runId: string) => {
     setStoppingRunId(runId);
@@ -166,12 +256,9 @@ export default function DashboardTab() {
   }, [load]);
 
   const passRate = stats?.passRatePercent ?? null;
-  const avgMs = stats?.averageDurationMs ?? null;
   const total = stats?.totalRuns ?? 0;
   const completed = stats?.completedRuns ?? 0;
   const running = stats?.runningRuns ?? 0;
-  const passed = stats?.passedRuns ?? 0;
-  const failed = stats?.failedRuns ?? 0;
 
   const sortedRuns = useMemo(() => {
     const rows = stats?.recentRuns ?? [];
@@ -246,9 +333,9 @@ export default function DashboardTab() {
 
         {stats && total > 0 && (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <MetricCard
-                label="Pass Rate"
+                label="Pass Rate %"
                 value={formatPassRate(passRate)}
                 hint={completed > 0 ? `Based on ${completed} completed run${completed !== 1 ? "s" : ""}` : "No completed runs yet"}
                 icon={Target}
@@ -256,51 +343,52 @@ export default function DashboardTab() {
                 isNa={passRate == null}
               />
               <MetricCard
-                label="Avg Duration"
-                value={formatDuration(avgMs)}
-                hint="Mean time for completed runs with timing data"
-                icon={Clock}
-                accent="from-sky-500 to-indigo-600"
-                isNa={avgMs == null}
-              />
-              <MetricCard
-                label="Total Runs"
+                label="Total Automation Runs"
                 value={String(total)}
-                hint="All executions stored in Supabase"
+                hint="All Playwright executions stored in Supabase"
                 subValue={completed > 0 ? `${completed} completed` : undefined}
                 icon={TrendingUp}
                 accent="from-violet-500 to-purple-600"
               />
               <MetricCard
-                label="Passed Runs"
-                value={String(passed)}
-                hint={passed > 0 ? "Successful executions" : "No passes recorded yet"}
-                icon={CheckCircle2}
-                accent={passed > 0 ? "from-emerald-500 to-green-600" : "from-slate-600 to-slate-700"}
+                label="Generated STDs"
+                value={String(stds.length)}
+                hint="Manual Standard Test Documentation tables saved"
+                icon={ClipboardList}
+                accent={stds.length > 0 ? "from-teal-500 to-emerald-600" : "from-slate-600 to-slate-700"}
               />
               <MetricCard
-                label="Failed Runs"
-                value={String(failed)}
-                hint={failed > 0 ? "Runs marked FAILED in Supabase" : "No failures recorded"}
-                icon={XCircle}
-                accent={failed > 0 ? "from-red-500 to-rose-600" : "from-slate-600 to-slate-700"}
-              />
-              <MetricCard
-                label="In Progress"
-                value={String(running)}
-                hint={running > 0 ? "Active runs in the last 30 minutes" : "No active runs"}
+                label="Avg Healing Speed"
+                value="N/A"
+                hint="Self-Heal duration isn't tracked yet — needs backend instrumentation"
                 icon={Zap}
-                accent={running > 0 ? "from-amber-500 to-orange-600" : "from-slate-600 to-slate-700"}
+                accent="from-slate-600 to-slate-700"
+                isNa
               />
             </div>
 
             {completed === 0 && (
               <SurfaceCard className="mt-4 text-xs text-amber-300/90 border-amber-500/20 bg-amber-500/5">
                 <strong>{total} run{total !== 1 ? "s" : ""} recorded</strong> but none are marked completed yet.
-                Run a new test to populate Pass Rate and Duration metrics.
+                Run a new test to populate Pass Rate metrics.
                 {running > 0 && ` (${running} still active.)`}
               </SurfaceCard>
             )}
+
+            <div className="mt-8">
+              <div className="flex items-center gap-3 mb-3">
+                <h3 className="text-sm font-semibold text-slate-200">Pass / Fail Trend</h3>
+                {running > 0 && (
+                  <span className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-amber-500/15 text-amber-400 border border-amber-500/25">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {running} running now
+                  </span>
+                )}
+              </div>
+              <SurfaceCard>
+                <PassFailTrendChart runs={stats.recentRuns} />
+              </SurfaceCard>
+            </div>
 
             {stats.recentRuns.length > 0 && (
               <div className="mt-8">

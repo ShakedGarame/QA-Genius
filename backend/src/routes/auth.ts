@@ -4,6 +4,7 @@ import passport from "../passportConfig.js";
 import { getOrCreateGuestUser, getOrCreateAdminUser, getUserSettings, upsertUserSettings } from "../db.js";
 import type { DbUser } from "../db.js";
 import { ensureDbUser } from "../middleware/ensureDbUser.js";
+import { fetchCoralogixLogs, resolveCoralogixConfig } from "../lib/coralogix.js";
 import { GUEST_COOKIE_NAME, guestToken } from "../lib/guestToken.js";
 
 const router = Router();
@@ -204,6 +205,9 @@ router.get("/api/me", ensureDbUser, async (req: Request, res: Response) => {
       hasAnthropic: !!(settings?.anthropic_api_key) || !!process.env.ANTHROPIC_API_KEY,
       hasCoralogix: !!(settings?.coralogix_api_key),
       hasEnvGitHubPat: !!process.env.GITHUB_ACTIONS_PAT,
+      hasJira:
+        !!(settings?.jira_domain && settings?.jira_email && settings?.jira_api_token) ||
+        !!(process.env.JIRA_DOMAIN && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN),
     });
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load account" });
@@ -281,6 +285,36 @@ router.put("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
     res.json({ success: true });
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to save settings" });
+  }
+});
+
+// POST /api/me/settings/test-coralogix — verify a Coralogix API key can query logs
+router.post("/api/me/settings/test-coralogix", ensureDbUser, async (req: Request, res: Response) => {
+  const user = getUser(req);
+  if (!user) return res.status(401).json({ error: "Not authenticated" });
+
+  const { coralogix_api_key, coralogix_region } = req.body as {
+    coralogix_api_key?: string;
+    coralogix_region?: string;
+  };
+
+  try {
+    const userSettings = await getUserSettings(user.id);
+    const stored = resolveCoralogixConfig(userSettings);
+
+    // Prefer a freshly-typed, not-yet-saved key over the stored one.
+    const apiKey =
+      coralogix_api_key && !coralogix_api_key.includes("•") ? coralogix_api_key.trim() : stored.apiKey;
+    const region = coralogix_region?.trim() || stored.region;
+
+    if (!apiKey) {
+      return res.status(400).json({ error: "No Coralogix API key configured" });
+    }
+
+    await fetchCoralogixLogs(apiKey, region, "*", 5);
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "Coralogix connection test failed" });
   }
 });
 

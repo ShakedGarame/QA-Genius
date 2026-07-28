@@ -317,7 +317,7 @@ export default function SettingsTab() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ coralogix_region: coralogixRegion }),
+        body: JSON.stringify({ coralogix_api_key: key, coralogix_region: coralogixRegion }),
       });
       setCoralogixStatus(res.ok ? "ok" : "fail");
     } catch {

@@ -1,105 +1,13 @@
 import { Router, Request, Response } from "express";
-import https from "https";
 import { analyzeFailure, analyzeRawLogs } from "../services/llm.js";
 import { mcpQueryLogs, mcpGetErrorTraces, AVAILABLE_TOOLS } from "../mcp/coralogix-server.js";
 import { AnalyzeFailureRequest } from "../types/index.js";
-import { getUserSettings, saveLogAnalysis, type DbUserSettings } from "../db.js";
+import { getUserSettings, saveLogAnalysis } from "../db.js";
 import type { DbUser } from "../db.js";
 import { extractOpenAIKeyFromRequest } from "../lib/requestKeys.js";
+import { fetchCoralogixLogs, resolveCoralogixConfig } from "../lib/coralogix.js";
 
 const router = Router();
-
-// ─── Coralogix real API fetch ─────────────────────────────────────────────────
-
-interface CoralogixLog {
-  text: string;
-  severity: number;
-  timestamp: string;
-  applicationName?: string;
-  subsystemName?: string;
-}
-
-async function fetchCoralogixLogs(
-  apiKey: string,
-  region: string,
-  query: string,
-  minutes = 30
-): Promise<string> {
-  const regionHost =
-    region.toUpperCase() === "US"
-      ? "api.coralogix.us"
-      : region.toUpperCase() === "AP"
-      ? "api.ap1.coralogix.com"
-      : "api.coralogix.com"; // EU default
-
-  const endTime = Date.now();
-  const startTime = endTime - minutes * 60 * 1000;
-
-  const payload = JSON.stringify({
-    query: { lucene: query || "*" },
-    metadata: {
-      tier: ["TIER_UNSPECIFIED"],
-      syntax: "QUERY_SYNTAX_LUCENE",
-      startDate: new Date(startTime).toISOString(),
-      endDate: new Date(endTime).toISOString(),
-      defaultSource: "tailing",
-    },
-  });
-
-  return new Promise((resolve, reject) => {
-    const req = https.request(
-      {
-        hostname: regionHost,
-        path: "/api/v1/dataprime/query",
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(payload),
-        },
-        timeout: 8000,
-      },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-        res.on("end", () => {
-          if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`Coralogix API error ${res.statusCode}: ${body.slice(0, 200)}`));
-            return;
-          }
-          // Coralogix returns newline-delimited JSON
-          const lines = body.trim().split("\n").filter(Boolean);
-          const entries: string[] = [];
-          for (const line of lines.slice(0, 50)) {
-            try {
-              const obj = JSON.parse(line) as { result?: { results?: CoralogixLog[] } };
-              const results = obj?.result?.results ?? [];
-              for (const r of results) {
-                entries.push(`[${r.timestamp ?? ""}] [${r.severity ?? "INFO"}] ${r.applicationName ?? "app"}: ${r.text ?? ""}`);
-              }
-            } catch { /* skip malformed lines */ }
-          }
-          resolve(entries.join("\n") || "(no logs returned for the selected time window)");
-        });
-      }
-    );
-    req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Coralogix request timed out")); });
-    req.write(payload);
-    req.end();
-  });
-}
-
-// ─── Resolve Coralogix config (user key > env key) ───────────────────────────
-
-function resolveCoralogixConfig(userSettings: DbUserSettings | null): {
-  apiKey: string | null;
-  region: string;
-} {
-  const apiKey = userSettings?.coralogix_api_key || process.env.CORALOGIX_API_KEY || null;
-  const region = userSettings?.coralogix_region ?? process.env.CORALOGIX_REGION ?? "EU";
-  return { apiKey, region };
-}
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 

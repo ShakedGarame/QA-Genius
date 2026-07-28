@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import {
   BrainCircuit,
   Sparkles,
@@ -270,12 +270,16 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
   // back preserves its state/scroll position — but it's never mounted, and
   // its data fetches never fire, until the user actually opens it.
   const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set(["generator"]));
+  const mainScrollRef = useRef<HTMLElement>(null);
 
   const activeItem = NAV_ITEMS.find((t) => t.id === activeTab) ?? NAV_ITEMS[0];
   const ActiveIcon = activeItem.icon;
 
   useEffect(() => {
     setVisitedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+    // The right-side workspace is the sole scroll container — reset it to the
+    // top on every tab switch so a new tab never opens mid-scroll.
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [activeTab]);
 
   useEffect(() => {
@@ -402,7 +406,12 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           <UserDropdown user={user} onLogout={onLogout} />
         </header>
 
-        <main id="main-content" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-y-auto lg:overflow-hidden" tabIndex={-1}>
+        <main
+          id="main-content"
+          ref={mainScrollRef}
+          className="flex-1 min-h-0 min-w-0 flex flex-col overflow-y-auto pb-24 scroll-smooth"
+          tabIndex={-1}
+        >
           {visitedTabs.has("generator") && (
             <div className={activeTab === "generator" ? "flex flex-col lg:flex-1 lg:min-h-0" : "hidden"}>
               <Suspense fallback={<TabLoadingFallback />}>

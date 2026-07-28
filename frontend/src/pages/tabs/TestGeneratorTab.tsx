@@ -3,8 +3,8 @@ import { useDropzone } from "react-dropzone";
 import {
   Play, Loader2, Sparkles, FileCode2, AlertCircle,
   CheckCircle2, RotateCcw, Save, Upload, FileText,
-  Code2, Globe, Tag, X, Square, ChevronUp,
-  Bot, ClipboardList, History as HistoryIcon,
+  Code2, Globe, Tag, X, Square,
+  ClipboardList, ChevronUp,
 } from "lucide-react";
 import clsx from "clsx";
 import StoryPanel from "../../components/qa-genius/StoryPanel";
@@ -17,9 +17,9 @@ import { useAuth } from "../../hooks/useAuth";
 import { buildOpenAIKeyHeaders, readOpenAIKeyForRequest } from "../../lib/apiKeys";
 import { routeFailureLogsToAnalyzer, getActionableFailureLogs, readPendingGeneratorRun, type RunInGeneratorPayload } from "../../lib/cloudRunner";
 import SelfHealModal from "../../components/qa-genius/SelfHealModal";
-import { ParsedPrd, GenerateTestsResult, UserStory, InputType, GenerateManualStdResult, ManualStdRecord } from "../../types";
+import { ParsedPrd, GenerateTestsResult, UserStory, InputType, GenerateManualStdResult } from "../../types";
 import { MOCK_CODE_MAP } from "../../data/mockData";
-import { SidebarPanel, PanelBody, EmptyState } from "../../components/ui/layout";
+import { EmptyState } from "../../components/ui/layout";
 
 // Monaco is the single heaviest dependency in the app and is only needed once a
 // test has actually been generated — lazy-load it so it never ships in the
@@ -131,33 +131,26 @@ function GeneratorModeToggle({
         <button
           onClick={() => onChange("playwright")}
           className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
+            "flex-1 flex items-center justify-center py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
             value === "playwright"
               ? "bg-sky-600 text-white shadow"
               : "text-slate-400 hover:text-slate-200"
           )}
         >
-          <Bot className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Playwright Automation</span>
+          <span className="truncate">🤖 Automation</span>
         </button>
         <button
           onClick={() => onChange("manual-std")}
           className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
+            "flex-1 flex items-center justify-center py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
             value === "manual-std"
               ? "bg-emerald-600 text-white shadow"
               : "text-slate-400 hover:text-slate-200"
           )}
         >
-          <ClipboardList className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Manual STD Generator</span>
+          <span className="truncate">📋 Manual STD</span>
         </button>
       </div>
-      <p className="text-[10px] text-slate-600 mt-1">
-        {value === "manual-std"
-          ? "Generates a manual Standard Test Documentation table with domain-aware coverage"
-          : "Generates executable Playwright automation code"}
-      </p>
     </div>
   );
 }
@@ -310,12 +303,15 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
               <p className="text-xs text-slate-300">Parsing…</p>
             </div>
           ) : uploadedFile ? (
-            <div className="flex items-center justify-center gap-2">
-              <FileText className="w-5 h-5 text-emerald-400" />
-              <p className="text-sm text-white">{uploadedFile.name}</p>
+            <div className="flex items-center justify-center gap-2 min-w-0">
+              <FileText className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+              <span className="max-w-[220px] truncate font-mono text-xs text-white" title={uploadedFile.name}>
+                {uploadedFile.name}
+              </span>
               <button
                 onClick={(e) => { e.stopPropagation(); setUploadedFile(null); }}
-                className="text-slate-500 hover:text-slate-300"
+                title="Remove file"
+                className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded hover:bg-surface-700 text-slate-500 hover:text-red-400 transition-colors"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -402,8 +398,6 @@ export default function TestGeneratorTab() {
   const [stdResult, setStdResult] = useState<GenerateManualStdResult | null>(null);
   const [isGeneratingStd, setIsGeneratingStd] = useState(false);
   const [stdError, setStdError] = useState<string | null>(null);
-  const [savedStds, setSavedStds] = useState<ManualStdRecord[]>([]);
-  const [stdDropdownOpen, setStdDropdownOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("configure");
   const [editedCode, setEditedCode] = useState("");
   const [savedAs, setSavedAs] = useState<string | null>(null);
@@ -413,6 +407,8 @@ export default function TestGeneratorTab() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [genResult, setGenResult] = useState<GenerateResult | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
+  const [configCollapsed, setConfigCollapsed] = useState(false);
+  const [formKey, setFormKey] = useState(0);
 
   // Pending input data
   const [pendingInput, setPendingInput] = useState<{
@@ -428,6 +424,7 @@ export default function TestGeneratorTab() {
   const { user } = useAuth();
   const lastAppliedRunTs = useRef(0);
   const [selfHealOpen, setSelfHealOpen] = useState(false);
+  const failureRef = useRef<HTMLDivElement>(null);
 
   const applyRunPayload = useCallback(
     async (detail: RunInGeneratorPayload) => {
@@ -548,6 +545,7 @@ export default function TestGeneratorTab() {
     // New generation — discard previous run output, artifacts, and failure analysis
     resetExecutionState();
     setStage("generated");
+    setConfigCollapsed(true);
 
     setIsGenerating(true);
     setGenError(null);
@@ -608,45 +606,6 @@ export default function TestGeneratorTab() {
     }
   };
 
-  const fetchSavedStds = useCallback(async () => {
-    try {
-      const res = await fetch("/api/manual-std", { credentials: "include" });
-      if (!res.ok) return;
-      const json = await res.json();
-      setSavedStds(json.stds ?? []);
-    } catch {
-      // Non-critical — the dropdown just stays empty
-    }
-  }, []);
-
-  useEffect(() => {
-    if (generatorMode === "manual-std") void fetchSavedStds();
-  }, [generatorMode, fetchSavedStds]);
-
-  const handleLoadSavedStd = async (id: string) => {
-    setStdDropdownOpen(false);
-    try {
-      const res = await fetch(`/api/manual-std/${encodeURIComponent(id)}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to load STD");
-      const std = json.std as ManualStdRecord;
-      setFeatureName(std.feature_name);
-      setFeatureNameSaved(true);
-      setFeatureNameError("");
-      setStdResult({
-        testCases: std.test_cases,
-        coverage: std.coverage,
-        model: std.model,
-        isMock: std.is_mock,
-        domain: std.domain,
-      });
-      setStdError(null);
-      setStage("generated");
-    } catch (e) {
-      setStdError(e instanceof Error ? e.message : "Failed to load STD");
-    }
-  };
-
   const handleGenerateStd = async () => {
     if (!featureName.trim()) {
       setFeatureNameError("Feature Name is required");
@@ -670,6 +629,7 @@ export default function TestGeneratorTab() {
     }
 
     setStage("generated");
+    setConfigCollapsed(true);
     setIsGeneratingStd(true);
     setStdError(null);
 
@@ -706,7 +666,7 @@ export default function TestGeneratorTab() {
 
       setStdResult(json.data as GenerateManualStdResult);
       setStage("generated");
-      void fetchSavedStds();
+      window.dispatchEvent(new CustomEvent("qa-genius:manual-std-changed"));
     } catch (e) {
       setStdError(e instanceof Error ? e.message : "STD generation failed");
     } finally {
@@ -759,122 +719,149 @@ export default function TestGeneratorTab() {
     setStdError(null);
     setPendingInput(null);
     setUserStories([]);
+    setActiveStoryId(undefined);
     setFeatureName("");
     setFeatureNameSaved(false);
     setFeatureNameError("");
+    setInputType("prd");
+    setGeneratorMode("playwright");
+    setConfigCollapsed(false);
+    setFormKey((k) => k + 1);
+    setTimeout(() => document.getElementById("feature-name")?.focus(), 80);
   };
 
   const showExecutionPanel = stage === "executed" || isRunning;
-  const showFailureAnalyzer = showExecutionPanel && runResult?.status === "failed" && !isRunning;
+  // Broader than a strict `status === "failed"` check on purpose: a run that
+  // ends via a non-clean path (network hiccup, malformed stream, backend
+  // error event) never gets a populated result, but the terminal has already
+  // moved past "running" — the banner still needs to show rather than
+  // silently vanish, so anything short of a genuine "passed" counts.
+  const showFailureAnalyzer = stage === "executed" && !isRunning && runResult?.status !== "passed";
+
+  useEffect(() => {
+    if (showFailureAnalyzer) {
+      failureRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [showFailureAnalyzer]);
 
   const stageList: Stage[] = generatorMode === "manual-std" ? ["configure", "generated"] : ["configure", "generated", "executed"];
   const stageIdx = stageList.indexOf(stage);
-  const hasOutputPane = generatorMode === "manual-std"
-    ? Boolean(stdResult || isGeneratingStd)
-    : Boolean(genResult || isGenerating);
-  const [mobileConfigOpen, setMobileConfigOpen] = useState(true);
-
-  useEffect(() => {
-    if (hasOutputPane) setMobileConfigOpen(false);
-  }, [hasOutputPane]);
 
   return (
-    <div className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 min-w-0 lg:overflow-hidden">
-      {/* ── Config panel ── */}
-      <SidebarPanel
-        width="lg:w-80"
-        className={clsx(
-          hasOutputPane && !mobileConfigOpen && "hidden lg:flex",
-          hasOutputPane && mobileConfigOpen && "lg:flex"
-        )}
-      >
-        <PanelBody className="p-4 space-y-4">
-          {/* Stage breadcrumb */}
-          <div className="flex items-center gap-1">
-            {stageList.map((s, i) => (
-              <div key={s} className="flex items-center gap-1">
-                {i > 0 && <div className="w-3 h-px bg-surface-500" />}
-                <span className={clsx(
-                  "text-[10px] px-1.5 py-0.5 rounded",
-                  stage === s ? "bg-sky-500/20 text-sky-300" : i < stageIdx ? "text-emerald-400" : "text-slate-600"
-                )}>
-                  {i < stageIdx && <CheckCircle2 className="w-2.5 h-2.5 inline mr-0.5" />}
-                  {s === "configure" ? "1.Configure" : s === "generated" ? "2.Generate" : "3.Execute"}
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto w-full pb-24">
+      {/* ── Top: compact config card (collapses to a sticky summary once generation starts) ── */}
+      <div className={clsx("flex-shrink-0 p-4 sm:p-6 pb-4", configCollapsed && "sticky top-0 z-10 bg-surface-900")}>
+        {configCollapsed ? (
+          <div className="flex items-center gap-2 flex-wrap bg-surface-800/60 border border-surface-700 rounded-xl px-4 py-2.5 text-xs text-slate-300">
+            <span className="text-slate-500">Feature:</span>
+            <span className="font-semibold text-slate-200 truncate max-w-[200px]">{featureName}</span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-500">Mode:</span>
+            <span>{generatorMode === "manual-std" ? "📋 Manual" : "🤖 Automation"}</span>
+            {pendingInput?.file?.name && (
+              <>
+                <span className="text-slate-600">|</span>
+                <span className="text-slate-500">File:</span>
+                <span className="truncate max-w-[180px] font-mono text-slate-400" title={pendingInput.file.name}>
+                  {pendingInput.file.name}
                 </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Feature Name */}
-          <FeatureNameInput
-            value={featureName}
-            onChange={handleFeatureNameChange}
-            onSave={handleSaveFeatureName}
-            isSaved={featureNameSaved}
-            error={featureNameError}
-          />
-
-          {/* Generator Mode — only show once feature name is saved */}
-          {featureNameSaved && (
-          <GeneratorModeToggle
-            value={generatorMode}
-            onChange={(v) => {
-              setGeneratorMode(v);
-              setGenResult(null);
-              setStdResult(null);
-              setGenError(null);
-              setStdError(null);
-              setStage("configure");
-              resetExecutionState();
-            }}
-          />
-          )}
-
-          {/* Input Type — only show once feature name is saved */}
-          {featureNameSaved && (
-          <InputTypeToggle value={inputType} onChange={(v) => { setInputType(v); setPendingInput(null); setUserStories([]); }} />
-          )}
-
-          {/* Saved STDs dropdown — only in Manual STD mode */}
-          {featureNameSaved && generatorMode === "manual-std" && savedStds.length > 0 && (
-            <div className="relative">
+              </>
+            )}
+            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
               <button
-                type="button"
-                onClick={() => setStdDropdownOpen((v) => !v)}
-                className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-surface-700 hover:bg-surface-600 text-slate-300 transition-colors"
+                onClick={handleReset}
+                title="Clear the form and start a new test"
+                className="border border-surface-700 hover:bg-surface-800 text-surface-200 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
               >
-                <span className="flex items-center gap-1.5"><HistoryIcon className="w-3.5 h-3.5" /> Saved STDs ({savedStds.length})</span>
-                <ChevronUp className={clsx("w-3.5 h-3.5 transition-transform", !stdDropdownOpen && "rotate-180")} />
+                🔄 New Test
               </button>
-              {stdDropdownOpen && (
-                <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto bg-surface-700 border border-surface-500 rounded-lg shadow-xl">
-                  {savedStds.map((std) => (
-                    <button
-                      key={std.id}
-                      onClick={() => handleLoadSavedStd(std.id)}
-                      className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-surface-600 hover:text-white transition-colors truncate"
-                    >
-                      {std.feature_name} <span className="text-slate-500">· {new Date(std.created_at).toLocaleDateString()}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <button
+                onClick={() => setConfigCollapsed(false)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 transition-colors"
+              >
+                ✏️ Edit Configuration
+              </button>
             </div>
-          )}
-
-          {/* Input area — only show once feature name is saved */}
-          {featureNameSaved && (
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              <Upload className="w-3 h-3" />
-              {inputType === "swagger" ? "Swagger / OpenAPI Spec" : "PRD Document"}
-            </label>
-            <InputArea
-              inputType={inputType}
-              onReady={handleInputReady}
-              isLoading={false}
-            />
           </div>
+        ) : (
+        <div className="bg-surface-800/60 border border-surface-700 rounded-xl p-5 space-y-4">
+          {/* Stage breadcrumb */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1">
+              {stageList.map((s, i) => (
+                <div key={s} className="flex items-center gap-1">
+                  {i > 0 && <div className="w-3 h-px bg-surface-500" />}
+                  <span className={clsx(
+                    "text-[10px] px-1.5 py-0.5 rounded",
+                    stage === s ? "bg-sky-500/20 text-sky-300" : i < stageIdx ? "text-emerald-400" : "text-slate-600"
+                  )}>
+                    {i < stageIdx && <CheckCircle2 className="w-2.5 h-2.5 inline mr-0.5" />}
+                    {s === "configure" ? "1.Configure" : s === "generated" ? "2.Generate" : "3.Execute"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {(genResult || stdResult) && (
+              <button
+                onClick={() => setConfigCollapsed(true)}
+                title="Minimize back into the summary bar"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors flex-shrink-0"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Collapse Panel</span>
+              </button>
+            )}
+          </div>
+
+          {/* Feature Name + Mode Toggle */}
+          <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+            <div className="w-full sm:max-w-md min-w-0">
+              <FeatureNameInput
+                value={featureName}
+                onChange={handleFeatureNameChange}
+                onSave={handleSaveFeatureName}
+                isSaved={featureNameSaved}
+                error={featureNameError}
+              />
+            </div>
+            {featureNameSaved && (
+              <div className="w-full lg:w-72 flex-shrink-0">
+                <GeneratorModeToggle
+                  value={generatorMode}
+                  onChange={(v) => {
+                    setGeneratorMode(v);
+                    setGenResult(null);
+                    setStdResult(null);
+                    setGenError(null);
+                    setStdError(null);
+                    setStage("configure");
+                    setConfigCollapsed(false);
+                    resetExecutionState();
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Input Type + Dropzone — only show once feature name is saved */}
+          {featureNameSaved && (
+            <div className="flex flex-col lg:flex-row gap-4">
+              <div className="w-full lg:w-56 flex-shrink-0">
+                <InputTypeToggle value={inputType} onChange={(v) => { setInputType(v); setPendingInput(null); setUserStories([]); }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                  <Upload className="w-3 h-3" />
+                  {inputType === "swagger" ? "Swagger / OpenAPI Spec" : "PRD Document"}
+                </label>
+                <InputArea
+                  key={formKey}
+                  inputType={inputType}
+                  onReady={handleInputReady}
+                  isLoading={false}
+                />
+              </div>
+            </div>
           )}
 
           {/* User stories preview (PRD mode) */}
@@ -883,13 +870,14 @@ export default function TestGeneratorTab() {
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
                 Detected Stories ({userStories.length})
               </p>
-              <div className="space-y-1 max-h-32 overflow-y-auto">
+              <div className="flex flex-wrap gap-1.5">
                 {userStories.map((s) => (
                   <button
                     key={s.id}
                     onClick={() => setActiveStoryId(s.id)}
+                    title={s.title}
                     className={clsx(
-                      "w-full text-left text-xs px-2 py-1.5 rounded border transition-all truncate",
+                      "text-left text-xs px-2.5 py-1.5 rounded-lg border transition-all truncate max-w-[220px]",
                       activeStoryId === s.id
                         ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
                         : "border-surface-600 bg-surface-800 text-slate-400 hover:text-slate-200"
@@ -902,88 +890,64 @@ export default function TestGeneratorTab() {
             </div>
           )}
 
-        {/* Generate button — only show once feature name is saved */}
-        {featureNameSaved && (
-          <div className="pt-4 border-t border-surface-600 space-y-2 flex-shrink-0">
-          {savedAs && (
-            <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2.5 py-1.5">
-              <Save className="w-3 h-3 flex-shrink-0" />
-              <span className="truncate font-mono">{featureSlug}/{savedAs}</span>
+          {/* Generate button — only show once feature name is saved */}
+          {featureNameSaved && (
+            <div className="pt-3 border-t border-surface-700 space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                {savedAs && (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2.5 py-1.5 flex-shrink-0">
+                    <Save className="w-3 h-3 flex-shrink-0" />
+                    <span className="max-w-[200px] truncate font-mono" title={`${featureSlug}/${savedAs}`}>{featureSlug}/{savedAs}</span>
+                  </div>
+                )}
+                <div className="flex gap-2 flex-1">
+                  {generatorMode === "manual-std" ? (
+                    <button
+                      onClick={handleGenerateStd}
+                      disabled={isGeneratingStd}
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500"
+                    >
+                      {isGeneratingStd ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
+                      {isGeneratingStd ? "Generating STD…" : "Generate Manual STD"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleGenerate}
+                      disabled={isGenerating}
+                      className={clsx(
+                        "flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+                        inputType === "swagger"
+                          ? "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500"
+                          : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500"
+                      )}
+                    >
+                      {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      {isGenerating ? "Generating…" : inputType === "swagger" ? "Generate API Tests" : "Generate UI Tests"}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleReset}
+                    title="Clear the form and start a new test"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-surface-700 hover:bg-surface-600 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span className="hidden sm:inline">New Test</span>
+                  </button>
+                </div>
+              </div>
+              {(generatorMode === "manual-std" ? stdError : genError) && (
+                <p className="text-xs text-red-400 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" /> {generatorMode === "manual-std" ? stdError : genError}
+                </p>
+              )}
             </div>
           )}
-          <div className="flex gap-2">
-            {generatorMode === "manual-std" ? (
-              <button
-                onClick={handleGenerateStd}
-                disabled={isGeneratingStd}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500"
-              >
-                {isGeneratingStd ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
-                {isGeneratingStd ? "Generating STD…" : "Generate Manual STD"}
-              </button>
-            ) : (
-              <button
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className={clsx(
-                  "flex-1 flex items-center justify-center gap-2 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
-                  inputType === "swagger"
-                    ? "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500"
-                    : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500"
-                )}
-              >
-                {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {isGenerating ? "Generating…" : inputType === "swagger" ? "Generate API Tests" : "Generate UI Tests"}
-              </button>
-            )}
-            {(genResult || stdResult) && (
-              <button
-                onClick={handleReset}
-                title="Start over"
-                className="p-2.5 bg-surface-700 hover:bg-surface-600 text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          {(generatorMode === "manual-std" ? stdError : genError) && (
-            <p className="text-xs text-red-400 flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5" /> {generatorMode === "manual-std" ? stdError : genError}
-            </p>
-          )}
-          </div>
+        </div>
         )}
+      </div>
 
-        {/* Mobile hint when no tests yet */}
-        {!hasOutputPane && (
-          <div className="lg:hidden rounded-xl border border-dashed border-surface-600 bg-surface-900/40 px-4 py-3 text-center">
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Complete the steps above, then generated tests and the run console will appear below.
-            </p>
-          </div>
-        )}
-        </PanelBody>
-      </SidebarPanel>
-
-      {/* ── Editor + console ── */}
-      <div className={clsx(
-        "qa-main-pane p-4 sm:p-6 gap-4 flex flex-col min-w-0",
-        "lg:flex-1 lg:min-h-0 lg:overflow-auto",
-        !hasOutputPane && "hidden lg:flex"
-      )}>
-        {hasOutputPane && (
-          <button
-            type="button"
-            onClick={() => setMobileConfigOpen((v) => !v)}
-            className="lg:hidden flex items-center justify-center gap-2 w-full py-2.5 rounded-lg text-xs font-medium text-slate-300 bg-surface-800 border border-surface-600 hover:bg-surface-700 transition-colors flex-shrink-0"
-          >
-            {mobileConfigOpen ? (
-              <><ChevronUp className="w-4 h-4" /> Hide setup — show tests</>
-            ) : (
-              <><Upload className="w-4 h-4" /> Show setup (feature name, PRD)</>
-            )}
-          </button>
-        )}
+      {/* ── Bottom: full-width results canvas ── */}
+      <div className="qa-main-pane overflow-visible p-4 sm:p-6 pt-0 pb-20 gap-4 flex flex-col min-w-0">
         {generatorMode === "manual-std" ? (
           <>
             {!stdResult && !isGeneratingStd && (
@@ -992,7 +956,7 @@ export default function TestGeneratorTab() {
                 accent="emerald"
                 title="No STD generated yet"
                 description="Enter a feature name, provide a PRD or Swagger spec, and click Generate Manual STD to create a Standard Test Documentation table."
-                hint="Follow the steps in the left panel: Configure → Generate."
+                hint="Follow the steps above: Configure → Generate."
               />
             )}
 
@@ -1033,7 +997,7 @@ export default function TestGeneratorTab() {
                 ? "Provide an OpenAPI spec and click Generate API Tests to create integration tests."
                 : "Enter a feature name, upload a PRD, and click Generate UI Tests to create Playwright tests."
             }
-            hint="Follow the steps in the left panel: Configure → Generate → Execute."
+            hint="Follow the steps above: Configure → Generate → Execute."
           />
         )}
 
@@ -1109,8 +1073,8 @@ export default function TestGeneratorTab() {
               </div>
             </div>
 
-            <div className="flex flex-col lg:grid lg:grid-cols-2 gap-4 pb-6 lg:flex-1 lg:min-h-0 lg:pb-0 lg:overflow-hidden">
-              <div className="h-[min(360px,50vh)] lg:h-auto lg:min-h-0">
+            <div className="flex flex-col lg:grid lg:grid-cols-2 gap-4 pb-6">
+              <div className="h-[70vh] min-h-[420px]">
                 <Suspense
                   fallback={
                     <div className="w-full h-full flex items-center justify-center bg-surface-800 rounded-lg border border-surface-600">
@@ -1125,10 +1089,10 @@ export default function TestGeneratorTab() {
                   />
                 </Suspense>
               </div>
-              <div className="flex flex-col gap-3 min-h-[320px] lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+              <div className="flex flex-col gap-3">
                 {showExecutionPanel ? (
                   <>
-                    <div className="h-[min(380px,55vh)] lg:h-auto lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                    <div className="h-[70vh] min-h-[420px]">
                       <ExecutionConsole
                         output={output}
                         result={runResult}
@@ -1150,7 +1114,7 @@ export default function TestGeneratorTab() {
                     )}
                   </>
                 ) : (
-                  <div className="flex-1 min-h-0 flex items-center justify-center rounded-lg border border-dashed border-surface-600 bg-surface-900/40 px-6">
+                  <div className="h-[70vh] min-h-[420px] flex items-center justify-center rounded-lg border border-dashed border-surface-600 bg-surface-900/40 px-6">
                     <EmptyState
                       icon={Play}
                       accent="emerald"
@@ -1164,19 +1128,21 @@ export default function TestGeneratorTab() {
             </div>
 
             {showFailureAnalyzer && (
-              <FailureAnalyzer
-                errorDetails={runResult?.errorDetails ?? ""}
-                failureLog={getActionableFailureLogs(runResult, output)}
-                testCode={editedCode}
-                hasCoralogix={!!user?.hasCoralogix}
-                onAnalyze={handleAnalyze}
-                onAnalyzeWithGitHubLogs={handleAnalyzeWithGitHubLogs}
-                onOpenSettings={handleOpenSettingsFromFailure}
-                onSelfHeal={handleSelfHeal}
-                isAnalyzing={isAnalyzing}
-                mcpSteps={mcpSteps}
-                analysis={analysis}
-              />
+              <div ref={failureRef}>
+                <FailureAnalyzer
+                  errorDetails={runResult?.errorDetails ?? ""}
+                  failureLog={getActionableFailureLogs(runResult, output)}
+                  testCode={editedCode}
+                  hasCoralogix={!!user?.hasCoralogix}
+                  onAnalyze={handleAnalyze}
+                  onAnalyzeWithGitHubLogs={handleAnalyzeWithGitHubLogs}
+                  onOpenSettings={handleOpenSettingsFromFailure}
+                  onSelfHeal={handleSelfHeal}
+                  isAnalyzing={isAnalyzing}
+                  mcpSteps={mcpSteps}
+                  analysis={analysis}
+                />
+              </div>
             )}
           </>
         )}

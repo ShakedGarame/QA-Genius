@@ -9,6 +9,7 @@ export interface AuthUser {
   hasOpenAI: boolean;
   hasAnthropic: boolean;
   hasCoralogix: boolean;
+  hasJira: boolean;
 }
 
 type AuthState =

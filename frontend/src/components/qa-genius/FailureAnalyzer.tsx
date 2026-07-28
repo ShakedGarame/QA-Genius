@@ -90,7 +90,6 @@ export default function FailureAnalyzer({
             </div>
           </div>
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 flex-shrink-0">
-            <McpSettingsButton onClick={() => setMcpModalOpen(true)} hasCoralogix={hasCoralogix} />
             {onSelfHeal && (
               <button
                 type="button"

@@ -39,18 +39,27 @@ const DOMAIN_STYLES: Record<string, string> = {
   general: "bg-slate-500/10 text-slate-400 border-slate-500/30",
 };
 
-/** Groups rows by their category (module title) while preserving first-seen order. */
+/** Groups ALL rows sharing a category together (even if the model interleaved them out of
+ * order), ordered by first appearance, so a module never repeats as a second block further
+ * down the table. Rows within a group are sorted by their numeric TC id for sequential display. */
 function groupByCategory(testCases: ManualStdTestCase[]): { title: string; rows: ManualStdTestCase[] }[] {
-  const groups: { title: string; rows: ManualStdTestCase[] }[] = [];
+  const order: string[] = [];
+  const rowsByTitle = new Map<string, ManualStdTestCase[]>();
   for (const tc of testCases) {
-    const last = groups[groups.length - 1];
-    if (last && last.title === tc.category) {
-      last.rows.push(tc);
-    } else {
-      groups.push({ title: tc.category, rows: [tc] });
+    if (!rowsByTitle.has(tc.category)) {
+      order.push(tc.category);
+      rowsByTitle.set(tc.category, []);
     }
+    rowsByTitle.get(tc.category)!.push(tc);
   }
-  return groups;
+  const idNumberOf = (id: string): number => {
+    const m = id.match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  return order.map((title) => ({
+    title,
+    rows: [...rowsByTitle.get(title)!].sort((a, b) => idNumberOf(a.id) - idNumberOf(b.id)),
+  }));
 }
 
 function Pill({ className, children }: { className: string; children: React.ReactNode }) {
@@ -129,8 +138,8 @@ export default function ManualStdTable({ testCases, coverage, featureName, domai
             </tr>
           </thead>
           <tbody>
-            {groupByCategory(testCases).map((group) => (
-              <Fragment key={group.title}>
+            {groupByCategory(testCases).map((group, groupIdx) => (
+              <Fragment key={`${group.title}-${groupIdx}`}>
                 <tr>
                   <td colSpan={8} className="px-3 py-1.5 bg-surface-700/60 text-slate-300 font-semibold text-[11px] uppercase tracking-wide border-b border-surface-500">
                     {group.title}

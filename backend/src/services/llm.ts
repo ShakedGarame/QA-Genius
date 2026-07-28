@@ -57,13 +57,30 @@ function stripMockModeArtifacts(code: string): string {
 
 // ── Skill 1: UI Test Generation (PRD → Playwright POM) ───────────────────────
 const TEST_GENERATION_SYSTEM = `\
-You are a Principal QA Automation Architect with 10+ years of experience designing \
-enterprise-grade test frameworks in Playwright and TypeScript for modern CI/CD pipelines. \
-You apply the playwright-e2e best practices: user-centric testing, resilient selectors, \
-isolation, and maximum readability. Tests are documentation — write them so a new team \
-member can understand the intent immediately. You test behavior, not just markup: a test \
-that only checks that something is on the page, without ever driving the interaction that \
-makes it meaningful, is an incomplete test.
+You are a Staff Test Automation Architect specializing in Playwright (TypeScript) for \
+high-scale Web & FinTech platforms. Your task is to analyze PRDs/Swagger specs and generate \
+ROBUST, Production-Grade E2E Test Suites using Page Object Model (POM). You apply the \
+playwright-e2e best practices: user-centric testing, resilient selectors, isolation, and \
+maximum readability. Tests are documentation — write them so a new team member can understand \
+the intent immediately. You test behavior, not just markup: a test that only checks that \
+something is on the page, without ever driving the interaction that makes it meaningful, is \
+an incomplete test.
+
+MANDATORY CODE QUALITY RULES:
+  1. Exhaustive Test Suite (15-20 tests minimum): never produce just 5-8 generic tests. Cover
+     Happy Paths, Negative scenarios, Network Edge Cases, and API Error States.
+  2. Explicit Arrange Phase & Network Intercepts (page.route): EVERY test MUST have fully
+     populated Arrange, Act, and Assert phases. Use page.route('**/api/...') to mock Geo-IP
+     responses, tax rate calculations, and PSP (payment service provider) timeouts where
+     relevant to the feature. NEVER leave empty Arrange comments.
+  3. True Parallel Concurrency: when testing race conditions or duplicate clicks, NEVER await
+     step-by-step sequentially. Use Promise.all([ page.click(...), page.click(...) ]) so the
+     actions actually race.
+  4. Resilient Locators & POM: use semantic locators (getByRole, getByTestId, getByLabel).
+     Encapsulate ALL actions and assertions cleanly inside Page Classes.
+  5. Handling Complex FinTech Flows: where the PRD touches payments, checkout, or cross-border
+     flows, mock 504 Gateway Timeouts, 410 Expired Links, 401 Invalid Webhook HMACs, and dynamic
+     currency conversions using page.route().
 
 ═══════════════════════════════════════════════
 LOCATOR STRATEGY — apply in this strict priority order:
@@ -75,6 +92,9 @@ LOCATOR STRATEGY — apply in this strict priority order:
   ✗ FORBIDDEN: page.locator('.btn-primary'), page.locator('#submit'),
     page.locator('/html/body/div[3]/button'),
     page.locator('div.container > ul > li:nth-child(3) > span')  ← brittle, breaks on any layout change
+  ✗ FORBIDDEN: page.getByRole('text', ...) — 'text' is NOT a valid ARIA role and this call
+    throws at runtime. For non-interactive visible content use page.getByText(...) instead,
+    or page.getByTestId(...) when the content has an explicit test hook.
 
 PAGE OBJECT MODEL — mandatory 2-class structure:
   ┌─ BasePage (abstract) — shared navigation helpers ─────────────────────────┐
@@ -156,6 +176,40 @@ NETWORK MOCKING — use page.route() to isolate tests from flaky APIs:
   await page.getByRole('button', { name: 'Submit' }).click();
   await responsePromise;
 
+FINTECH-SPECIFIC MOCKING — apply whenever the PRD touches payments, checkout, pricing, or
+cross-border/multi-currency flows:
+  // Geo-IP / geolocation — vary per test to simulate real regional behavior
+  await page.route('**/api/geo-ip', route => route.fulfill({
+    status: 200,
+    body: JSON.stringify({ country: 'BR', currency: 'BRL' }), // or 'IL'/'ILS', 'JP'/'JPY'
+  }));
+  // Tax rate calculation
+  await page.route('**/api/tax-rate', route => route.fulfill({
+    status: 200, body: JSON.stringify({ rate: 0.17 }),
+  }));
+  // PSP (payment service provider) timeout
+  await page.route('**/api/payments/**', route => route.fulfill({ status: 504 }));
+  // Expired checkout/payment link
+  await page.route('**/api/checkout/session/**', route => route.fulfill({ status: 410 }));
+  // Invalid webhook HMAC signature — webhook endpoints are called server-to-server, not driven
+  // through the UI, so exercise them directly with Playwright's \`request\` fixture instead of
+  // page.route(). Never stand this test up as an empty "// Act" comment with no real call:
+  test('should reject webhook with invalid HMAC signature', async ({ request }) => {
+    const response = await request.post('/api/webhooks', {
+      headers: { 'X-Appcharge-Signature': 'invalid_hmac' },
+      data: { event: 'payment.succeeded' },
+    });
+    expect(response.status()).toBe(401);
+  });
+  // Pix QR code expiration (Brazil instant-payment method) — when the PRD mentions Pix or a
+  // QR-code payment flow, always include a dedicated test for the ~5-minute QR TTL expiring,
+  // mocked as a 410:
+  await page.route('**/api/pix/qr-code/**', route => route.fulfill({ status: 410 }));
+  await expect(page.getByText(/expired|generate a new code/i)).toBeVisible();
+  For each of these, assert both the correct status-code handling AND that the UI (or API
+  response body, for pure API-level tests) shows the right fallback/error state — never assert
+  the status code alone.
+
 MANDATORY EDGE & FALLBACK CASES — non-negotiable when the PRD describes any of the following:
   fallback behavior, graceful degradation, error handling, retry logic, timeout behavior,
   offline/network-failure handling, or performance/SLA requirements tied to an API call.
@@ -201,14 +255,24 @@ ANTI-PATTERNS — NEVER generate these:
     interaction-driven state-change test, and the mandatory fallback/error test where applicable)
   ✗ Skipping the fallback/error-simulation test when the PRD mentions fallback, error handling,
     retries, timeouts, or performance requirements
+  ✗ Empty or placeholder Arrange comments ("// Arrange" with nothing under it)
+  ✗ Sequential await calls for race-condition/duplicate-click tests — use Promise.all() so the
+    actions genuinely race
+  ✗ Fewer than 15 tests total for a feature with any negative, network-edge, or API-error surface
 ═══════════════════════════════════════════════
 OUTPUT RULES:
   - Return ONLY raw TypeScript code.
   - NO markdown code fences (\`\`\`), NO introductory text, NO trailing explanations.
   - Generate COMPLETE, runnable code — no stubs, no TODOs.
+  - Structure the file as a BasePage plus one or more feature-specific Page Classes extending it.
   - Each user story should produce a RICH test.describe() suite: a happy-path test that performs
     the real interaction and asserts on the resulting state, plus every edge, fallback, and error
-    case implied by the PRD for that story. Do not collapse a story into a single assertion.`;
+    case implied by the PRD for that story. Do not collapse a story into a single assertion.
+  - Across the whole file, aim for 15-20 tests minimum when the PRD has any negative, network-edge,
+    or API-error surface — do not stop at a handful of generic happy-path tests.
+  - Where assertions depend on a mocked network response, set an explicit assertion timeout
+    (e.g. { timeout: 5000 }) instead of relying on the default, and assert on the specific status
+    code (410, 504, 400, 401, etc.) as well as the resulting UI state.`;
 
 // ── Skill 2: API Test Generation (Swagger/OpenAPI → Playwright request) ───────
 const API_TEST_GENERATION_SYSTEM = `\
@@ -604,7 +668,23 @@ Requirements:
   state-change test for dynamic UI, and a page.route()-based failure-simulation test for any
   fallback/error/performance requirement. Do not summarize these as a single toBeVisible() check.
 - Each story's test.describe() block should read as a small suite, not a single assertion: happy
-  path (with real interactions) + relevant edge cases + the fallback/error test where applicable.`;
+  path (with real interactions) + relevant edge cases + the fallback/error test where applicable.
+- Target 15-20 tests total across the suite when the PRD has any negative, network-edge, or
+  API-error surface. Do not settle for 5-8 generic tests.
+- If the feature involves payments, checkout, pricing, or region-aware behavior, include at least
+  one test per relevant region (e.g. Brazil, Israel, Japan) by mocking the geo-IP/geolocation
+  response differently per test, plus dedicated tests for PSP timeouts (504), expired links (410),
+  invalid webhook HMACs (401), and dynamic currency conversion.
+- If the feature involves Pix or any QR-code-based payment method, include one dedicated test
+  covering the QR code's TTL (~5 minutes) expiring, mocked as a 410 response, asserting the UI
+  shows a "generate a new code" / expired state.
+- Webhook signature/HMAC tests must call the endpoint directly through Playwright's \`request\`
+  fixture (APIRequestContext) and assert on \`response.status()\` — never leave them as a
+  page.route() mock with no actual triggering call.
+- Never use page.getByRole('text', ...) — 'text' is not a valid ARIA role; use getByText() or
+  getByTestId() instead.
+- For any test verifying a race condition or duplicate-submit protection, trigger the competing
+  actions with Promise.all() rather than sequential awaits.`;
 
   let code: string;
   let model: string;
@@ -1288,6 +1368,12 @@ const AUTH_KEYWORDS =
   /\b(login|log in|log-in|sign in|sign-in|signup|sign up|sign-up|authenticat\w*|password|session|SSO|single sign-on|OAuth|2FA|MFA|multi-factor|access token|refresh token)\b/i;
 const GAMING_KEYWORDS =
   /\b(game|gaming|player|leaderboard|matchmaking|multiplayer|real-time|realtime|inventory|lobby|latency|respawn)\b/i;
+const PIX_KEYWORDS = /\bpix\b/i;
+const QR_CODE_KEYWORDS = /\bqr[\s-]?code\b/i;
+const ENTITLEMENT_KEYWORDS = /\bentitlement/i;
+const PSP_KEYWORDS = /\bpsp\b/i;
+const GAME_SERVER_KEYWORDS = /\bgame\s*server\b/i;
+const DLQ_RECONCILIATION_KEYWORDS = /\b(dead[\s-]?letter|DLQ|reconciliation)\b/i;
 
 /** Returns "general" or a "+"-joined list of every matched domain (a PRD can match more than one). */
 function detectStdDomain(rawText: string): StdDomain {
@@ -1298,13 +1384,40 @@ function detectStdDomain(rawText: string): StdDomain {
   return matches.length ? matches.join("+") : "general";
 }
 
+/** True when the input describes a Pix payment flow gated by a time-boxed QR code. */
+function hasPixQrExpiry(rawText: string): boolean {
+  return PIX_KEYWORDS.test(rawText) && QR_CODE_KEYWORDS.test(rawText);
+}
+
+/** True when the input describes a PSP payment success that must independently trigger a
+ * downstream (e.g. Game Server) entitlement grant, with a DLQ/reconciliation safety net. */
+function hasEntitlementFailurePath(rawText: string): boolean {
+  return (
+    ENTITLEMENT_KEYWORDS.test(rawText) &&
+    (PSP_KEYWORDS.test(rawText) || GAME_SERVER_KEYWORDS.test(rawText) || DLQ_RECONCILIATION_KEYWORDS.test(rawText))
+  );
+}
+
 const MANUAL_STD_BASE_SYSTEM = `\
-You are a Deep QA Architect writing professional, engineering-grade Standard Test \
-Documentation (STD) for ANY software feature — Authentication, Gaming, E-commerce, \
-Dashboards, FinTech, or any other domain. Before writing a single test case, analyze the \
-input for Hidden Requirements (e.g. a "Delete" action implies tests for Undo, Permissions, \
-and Database Integrity even if never stated), potential failure points in the described \
-logic, and edge cases not explicitly mentioned.
+You are a Staff Principal QA Architect and Test Engineering Lead with 15+ years of experience \
+in E2E Testing, FinTech/Payment Gateways, Microservices, and API Testing. Your job is to \
+analyze PRDs/Swagger specs and design EXHAUSTIVE, highly detailed, risk-focused Manual STD \
+(Standard Test Documentation) suites for ANY software feature — Authentication, Gaming, \
+E-commerce, Dashboards, FinTech, or any other domain. Before writing a single test case, \
+analyze the input for Hidden Requirements (e.g. a "Delete" action implies tests for Undo, \
+Permissions, and Database Integrity even if never stated), potential failure points in the \
+described logic, and edge cases not explicitly mentioned.
+
+YOUR ANALYTICAL RIGOR & RULES:
+  1. Depth over Brevity — never produce high-level one-liners. Generate 25 to 30 deep,
+     granular, step-by-step test cases; this is a hard floor, not a target.
+  2. Hidden Requirement & Edge Case Hunting — actively hunt for unstated assumptions, Boundary
+     Value Analysis (BVA), race conditions, and failover paths the source document never spells out.
+  3. Mandatory Test Type Mix — every suite MUST include Happy Path, Negative Testing,
+     Concurrency/Idempotency, Security/RBAC with HMAC signature verification, Data Integrity
+     (literal SQL), and Resilience/DLQ Retries — regardless of domain (see STEP 2 below).
+  4. 100% PRD Coverage — every feature requirement and risk item in the source document MUST be
+     fully mapped in "coverage" — no gaps.
 
 ═══════════════════════════════════════════════
 STEP 1 — IDENTIFY MODULES (never abstract categories):
@@ -1321,16 +1434,21 @@ STEP 2 — MANDATORY TEST CATEGORY DIVERSITY (distribute across the modules abov
   1. Happy Path / Functional Workflows        — the primary documented flow succeeds end-to-end
   2. Negative Testing & Boundary Value Analysis (BVA) — invalid/empty/null/oversized input,
                                                   malformed payloads, boundary limits (0, -1, max int)
-  3. Edge Cases & Race Conditions / Concurrency — simultaneous duplicate actions, out-of-order
+  3. Edge Cases, Race Conditions & Idempotency — simultaneous duplicate actions (retried with the
+                                                  same idempotency key/request ID), out-of-order
                                                   events, stale writes, double-submits
   4. Security, Authentication & Authorization (RBAC) — role matrix (e.g. Viewer/Owner/Admin) at
                                                   BOTH UI and API layers, JWT expiry/tampering,
-                                                  IDOR / cross-tenant access, session invalidation
+                                                  IDOR / cross-tenant access, session invalidation,
+                                                  and HMAC/signature verification on any inbound
+                                                  webhook or server-to-server call
   5. Data Integrity, Database State & Event Validation — for every value shown in the UI, describe
                                                   the literal SQL query or event/webhook payload
                                                   that proves the backing store holds the same value
-  6. Failover, Timeouts, Error Handling & Async Recovery — upstream 5xx/timeout, retry-with-
-                                                  backoff, async job failure, partial-failure recovery
+  6. Failover, Timeouts & Resilience / DLQ Retries — upstream 5xx/timeout, retry-with-backoff,
+                                                  async job failure routed to a Dead Letter Queue
+                                                  (DLQ) or reconciliation process, partial-failure
+                                                  recovery
 
 STEP 3 — DYNAMIC DOMAIN ADAPTATION — apply any of the following addenda that were appended
   to these instructions (they are appended only when the input actually matches that domain).
@@ -1338,15 +1456,15 @@ STEP 3 — DYNAMIC DOMAIN ADAPTATION — apply any of the following addenda that
   force irrelevant FinTech/Auth/Gaming cases onto an unrelated domain.
 
 STEP 4 — GRANULARITY (non-negotiable):
-  - Minimum 20 to 25 test cases total. Fewer than 20 is an incomplete STD — do not stop early,
-    and do not pad with near-duplicate cases; every case must exercise a distinct condition.
+  - 25 to 30 test cases total. Fewer than 25 is an incomplete STD — do not stop early, and do
+    not pad with near-duplicate cases; every case must exercise a distinct condition.
   - 100% requirement coverage: every functional requirement, sub-feature, and implied edge
     case in the source document must map to at least one test case in "coverage" — no gaps.
   - "steps" must NEVER be a vague one-liner. Specify exact parameters, HTTP status codes
     (e.g. "assert response status is 410 Gone", "assert 401 Unauthorized"), concrete UI
     actions (e.g. "click the 'Confirm Refund' button"), and literal SQL DB assertions where
     relevant (e.g. "SELECT status FROM orders WHERE id = :orderId — expect status = 'REFUNDED'").
-  - If you are at risk of running out of output space, prioritize completing ALL 20-25 test
+  - If you are at risk of running out of output space, prioritize completing ALL 25-30 test
     cases with concise-but-concrete steps over elaborating a smaller number at length.
 
 ADVANCED METHODOLOGIES — apply throughout:
@@ -1390,7 +1508,7 @@ RISK LEVELS: P0 = critical (system crash, data loss, security breach) · P1 = hi
 feature broken, no workaround) · P2 = medium (degraded experience, workaround exists) ·
 P3 = low (cosmetic, edge case, minor UX issue).
 
-IDs are sequential across the ENTIRE document (TC-01, TC-02, … TC-25 or beyond) regardless
+IDs are sequential across the ENTIRE document (TC-01, TC-02, … TC-30 or beyond) regardless
 of module — never restart numbering per module, never reuse an ID. Every test case's
 "steps" must be concrete and executable by a manual tester with no other context.`;
 
@@ -1456,16 +1574,200 @@ test cases (place them in whichever module fits best, or create "Module N: Real-
                           grant or a lost item.
 These are non-negotiable additions on top of, not instead of, Steps 1-2.`;
 
+const MANUAL_STD_PIX_QR_ADDENDUM = `
+
+═══════════════════════════════════════════════
+PIX QR-CODE PAYMENT DETECTED — the input references a Pix payment gated by a time-boxed QR
+code. On top of Steps 1-2 (and the FinTech addendum above), you MUST include a dedicated
+test case — it MUST appear as its own row in "testCases" AND its own row in "coverage", not
+merely implied by another test — covering:
+  - Expired QR Code (Pix) — once the QR code's documented TTL (e.g. 5 minutes) elapses, an
+    attempt to pay against it is rejected as EXPIRED rather than silently accepted or left
+    pending indefinitely; no charge or entitlement is granted against an expired code, and a
+    fresh QR code is required to complete the payment.
+This is non-negotiable.`;
+
+const MANUAL_STD_ENTITLEMENT_ADDENDUM = `
+
+═══════════════════════════════════════════════
+ENTITLEMENT / FULFILLMENT RELIABILITY DETECTED — the input describes a flow where a payment
+service provider (PSP) confirms payment success while a downstream system (e.g. a Game
+Server) must independently grant the purchased entitlement. On top of Steps 1-2, you MUST
+include a dedicated test case — it MUST appear as its own row in "testCases" AND its own row
+in "coverage", not merely implied by another test — covering:
+  - Entitlement Failure Recovery — the PSP confirms payment success while the downstream
+    entitlement-grant call fails (5xx/timeout); the failure is never silently dropped — it
+    lands in a Dead Letter Queue (DLQ) or reconciliation process for retry, the entitlement
+    is eventually granted exactly once via that retry/reconciliation, and no duplicate grant
+    occurs if the retry later succeeds.
+This is non-negotiable.`;
+
 function buildManualStdSystemPrompt(rawText: string): { prompt: string; domain: StdDomain } {
   const domain = detectStdDomain(rawText);
   const addenda = [
     domain.includes("fintech") && MANUAL_STD_FINTECH_ADDENDUM,
     domain.includes("auth") && MANUAL_STD_AUTH_ADDENDUM,
     domain.includes("gaming") && MANUAL_STD_GAMING_ADDENDUM,
+    hasPixQrExpiry(rawText) && MANUAL_STD_PIX_QR_ADDENDUM,
+    hasEntitlementFailurePath(rawText) && MANUAL_STD_ENTITLEMENT_ADDENDUM,
   ]
     .filter((a): a is string => Boolean(a))
     .join("");
   return { prompt: MANUAL_STD_BASE_SYSTEM + addenda, domain };
+}
+
+/** Extracts the leading "Module N" number from a category title, or null if absent. */
+function moduleNumberOf(category: string): number | null {
+  const m = category.match(/module\s+(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** Sorts test cases so every case for Module 1 appears together, then Module 2, etc. — never
+ * interleaved — while keeping cases within a module ordered by their numeric TC id. Modules
+ * without a "Module N" prefix keep their first-seen relative order, placed after numbered ones. */
+function sortTestCasesByModule(testCases: ManualStdTestCase[]): ManualStdTestCase[] {
+  const firstSeenIndex = new Map<string, number>();
+  testCases.forEach((tc, idx) => {
+    if (!firstSeenIndex.has(tc.category)) firstSeenIndex.set(tc.category, idx);
+  });
+  const idNumberOf = (id: string): number => {
+    const m = id.match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  return [...testCases].sort((a, b) => {
+    const moduleA = moduleNumberOf(a.category);
+    const moduleB = moduleNumberOf(b.category);
+    if (moduleA !== null && moduleB !== null && moduleA !== moduleB) return moduleA - moduleB;
+    if (moduleA !== null && moduleB === null) return -1;
+    if (moduleA === null && moduleB !== null) return 1;
+    if (a.category !== b.category) return firstSeenIndex.get(a.category)! - firstSeenIndex.get(b.category)!;
+    return idNumberOf(a.id) - idNumberOf(b.id);
+  });
+}
+
+/** Re-assigns "TC-01".."TC-N" strictly in array order (call AFTER sortTestCasesByModule) so
+ * Module 1 always gets the lowest contiguous ID range, Module 2 the next, etc. — no scattered
+ * IDs left over from the model's original numbering. Coverage rows are remapped to match. */
+function renumberSequentially(
+  testCases: ManualStdTestCase[],
+  coverage: StdCoverageRow[]
+): { testCases: ManualStdTestCase[]; coverage: StdCoverageRow[] } {
+  const idMap = new Map<string, string>();
+  const renumbered = testCases.map((tc, idx) => {
+    const newId = `TC-${String(idx + 1).padStart(2, "0")}`;
+    idMap.set(tc.id, newId);
+    return { ...tc, id: newId };
+  });
+  const remappedCoverage = coverage.map((row) => ({
+    ...row,
+    testCaseIds: row.testCaseIds.map((id) => idMap.get(id) ?? id),
+  }));
+  return { testCases: renumbered, coverage: remappedCoverage };
+}
+
+/** Picks an existing module category matching one of `matchers`, or synthesizes a new
+ * "Module N: <fallbackTitle>" continuing the document's existing module numbering. */
+function pickOrCreateModule(testCases: ManualStdTestCase[], matchers: RegExp[], fallbackTitle: string): string {
+  const existing = testCases.find((tc) => matchers.some((re) => re.test(tc.category)));
+  if (existing) return existing.category;
+  const maxModuleNum = testCases.reduce((acc, tc) => {
+    const n = moduleNumberOf(tc.category);
+    return n !== null ? Math.max(acc, n) : acc;
+  }, 0);
+  return `Module ${maxModuleNum + 1}: ${fallbackTitle}`;
+}
+
+/** Next sequential "TC-NN" id continuing from the highest id already present. */
+function nextSequentialId(testCases: ManualStdTestCase[]): string {
+  const max = testCases.reduce((acc, tc) => {
+    const m = tc.id.match(/(\d+)/);
+    return m ? Math.max(acc, parseInt(m[1], 10)) : acc;
+  }, 0);
+  return `TC-${String(max + 1).padStart(2, "0")}`;
+}
+
+interface MandatoryCoverageRule {
+  detect: (rawText: string) => boolean;
+  isCovered: (testCases: ManualStdTestCase[]) => boolean;
+  requirement: string;
+  build: (testCases: ManualStdTestCase[]) => ManualStdTestCase;
+}
+
+const MANDATORY_COVERAGE_RULES: MandatoryCoverageRule[] = [
+  {
+    detect: hasPixQrExpiry,
+    isCovered: (tcs) => tcs.some((tc) => /qr/i.test(tc.scenario) && /(expir|ttl)/i.test(tc.scenario)),
+    requirement: "Expired QR Code (Pix) — payment rejected once its documented 5-minute TTL elapses",
+    build: (testCases) => ({
+      category: pickOrCreateModule(testCases, [/payment/i, /webhook/i], "Payment & Webhook Reliability"),
+      id: nextSequentialId(testCases),
+      testType: "Negative",
+      scenario: "Verify a Pix QR code payment is rejected once its documented 5-minute TTL has elapsed",
+      preconditions: [
+        "A Pix QR code has been generated for a pending payment",
+        "No payment has been confirmed against this QR code yet",
+      ],
+      steps: [
+        "Generate a Pix QR code for a payment",
+        "Wait until 1 second after the QR code's documented 5-minute TTL has elapsed",
+        "Attempt to pay against the expired QR code",
+        "Query the order/payment record for this QR code",
+      ],
+      expectedResult:
+        "The payment attempt is rejected as EXPIRED; the order remains unpaid, no entitlement is granted, and the record is not left PENDING indefinitely",
+      validationMethod: "SQL Query",
+      riskLevel: "P1",
+      riskImpact:
+        "An expired QR code accepted silently (or left pending forever) lets a payment bypass its trusted validity window, or leaves orders permanently stuck",
+    }),
+  },
+  {
+    detect: hasEntitlementFailurePath,
+    isCovered: (tcs) =>
+      tcs.some((tc) => /entitlement/i.test(tc.scenario) && /(dlq|dead.?letter|reconcil)/i.test(`${tc.scenario} ${tc.expectedResult}`)),
+    requirement: "Entitlement Failure Recovery — PSP success + Game Server grant failure routes to DLQ/reconciliation",
+    build: (testCases) => ({
+      category: pickOrCreateModule(
+        testCases,
+        [/entitlement/i, /fulfillment/i, /resilience/i, /failover/i],
+        "Entitlement & Fulfillment Reliability"
+      ),
+      id: nextSequentialId(testCases),
+      testType: "Integration",
+      scenario: "Verify a PSP payment success combined with a Game Server entitlement-grant failure is never silently lost",
+      preconditions: [
+        "A payment can be simulated to succeed at the PSP",
+        "The Game Server entitlement-grant call can be simulated to fail (5xx/timeout)",
+      ],
+      steps: [
+        "Trigger a purchase and force the PSP to confirm payment success",
+        "Force the downstream Game Server entitlement-grant call to fail",
+        "Query the Dead Letter Queue (DLQ) / reconciliation store for this transaction",
+        "Allow the retry/reconciliation process to run, then re-query the player's entitlement state",
+      ],
+      expectedResult:
+        "The failed grant lands in the DLQ/reconciliation queue rather than being dropped; the entitlement is eventually granted exactly once via retry/reconciliation, with no duplicate grant and no charge without eventual fulfillment",
+      validationMethod: "SQL Query",
+      riskLevel: "P0",
+      riskImpact:
+        "A payment that succeeds without the corresponding entitlement ever being granted is a direct revenue/trust failure and a support/chargeback magnet",
+    }),
+  },
+];
+
+/** Guarantees 100% coverage of the mandatory domain-specific requirements even if the model's
+ * output omitted them — appends a synthesized test case + coverage row for each missing rule. */
+function enforceMandatoryCoverage(
+  result: { testCases: ManualStdTestCase[]; coverage: StdCoverageRow[] },
+  rawText: string
+): void {
+  for (const rule of MANDATORY_COVERAGE_RULES) {
+    if (!rule.detect(rawText)) continue;
+    if (rule.isCovered(result.testCases)) continue;
+    const testCase = rule.build(result.testCases);
+    result.testCases.push(testCase);
+    result.coverage.push({ requirement: rule.requirement, testCaseIds: [testCase.id] });
+  }
 }
 
 function buildMockManualStd(featureName: string, domain: StdDomain): { testCases: ManualStdTestCase[]; coverage: StdCoverageRow[] } {
@@ -1640,8 +1942,11 @@ export async function generateManualStd(
 
   if (isMock) {
     await new Promise((r) => setTimeout(r, 1800));
-    const { testCases, coverage } = buildMockManualStd(featureName, domain);
-    return { testCases, coverage, model: "mock", isMock: true, domain };
+    const result = buildMockManualStd(featureName, domain);
+    enforceMandatoryCoverage(result, rawText);
+    const sorted = sortTestCasesByModule(result.testCases);
+    const final = renumberSequentially(sorted, result.coverage);
+    return { testCases: final.testCases, coverage: final.coverage, model: "mock", isMock: true, domain };
   }
 
   const userPrompt = `\
@@ -1657,14 +1962,14 @@ ${featureName}
 ${rawText.slice(0, 12000)}
 ═══════════════════════════════════════════════
 Requirements:
-- Generate a MINIMUM of 20-25 distinct, granular test cases — this is a hard floor, not a target.
+- Generate a MINIMUM of 25-30 distinct, granular test cases — this is a hard floor, not a target.
 - Group every test case under a descriptive module title (never an abstract letter/number alone).
 - Ensure 100% of the requirements above are mapped in "coverage" — no PRD requirement left uncovered.
 - Steps must include concrete parameters, HTTP status codes, and literal SQL/DB assertions where relevant.
 Return ONLY the JSON object defined in your system instructions — no extra text, no
 markdown fences.`;
 
-  // STD output is now a large structured JSON payload — 20-25 granular test cases across
+  // STD output is now a large structured JSON payload — 25-30 granular test cases across
   // several modules, each with detailed multi-step instructions, plus domain addenda and a
   // full coverage table. The default 3000-token budget shared by the other skills would
   // truncate this mid-object almost immediately, so this call gets a much larger budget.
@@ -1686,7 +1991,11 @@ markdown fences.`;
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { testCases: ManualStdTestCase[]; coverage: StdCoverageRow[] };
-    return { testCases: parsed.testCases ?? [], coverage: parsed.coverage ?? [], model, isMock: false, domain };
+    const result = { testCases: parsed.testCases ?? [], coverage: parsed.coverage ?? [] };
+    enforceMandatoryCoverage(result, rawText);
+    const sorted = sortTestCasesByModule(result.testCases);
+    const final = renumberSequentially(sorted, result.coverage);
+    return { testCases: final.testCases, coverage: final.coverage, model, isMock: false, domain };
   } catch {
     throw new Error("Failed to parse STD response from the model. Please try again.");
   }
