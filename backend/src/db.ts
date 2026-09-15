@@ -24,6 +24,10 @@ export interface DbUser {
   avatar_url: string | null;
   created_at: string;
   last_login: string;
+  /** True only for a virtual, never-persisted public-guest identity (see
+   * buildPublicGuest). Absent/false for every real, DB-backed user —
+   * including the local-dev guest, which is a real row once resolved. */
+  is_guest?: boolean;
 }
 
 export interface DbUserSettings {
@@ -117,13 +121,20 @@ export async function findUserById(id: string): Promise<DbUser | undefined> {
   }
 }
 
-/** Stable in-memory guest used when Supabase is temporarily unreachable locally. */
+/** Sentinel id for the local-dev auto-login placeholder, before it's reconciled
+ * to the real local-dev DB row by ensureDbUser/resolveDbUser. Kept unchanged
+ * so an existing local session cookie doesn't silently log out. */
+const LOCAL_DEV_SENTINEL_ID = "local-dev-guest";
+
+/** Stable in-memory placeholder used before the local-dev identity is
+ * reconciled to its real DB row, and as a last-resort fallback if Supabase is
+ * genuinely unreachable. */
 export function buildLocalDevGuest(): DbUser {
   return {
-    id: "local-dev-guest",
-    github_id: "mock_user_123",
+    id: LOCAL_DEV_SENTINEL_ID,
+    github_id: "local_dev_guest",
     google_id: null,
-    email: "guest@qa-genius.com",
+    email: "dev@qa-genius.local",
     name: "Guest Developer",
     avatar_url: "https://avatars.githubusercontent.com/u/0?v=4",
     created_at: new Date().toISOString(),
@@ -131,21 +142,69 @@ export function buildLocalDevGuest(): DbUser {
   };
 }
 
-export async function getOrCreateGuestUser(): Promise<DbUser> {
+/** Dedicated local-dev identity — separate from both the historical shared
+ * public-guest row and the new stateless public-guest mechanism, so a
+ * developer's local Feature/History/Settings keep persisting across restarts
+ * exactly as before this fix. */
+export async function getOrCreateLocalDevUser(): Promise<DbUser> {
   try {
     return await upsertGithubUser({
-      githubId: "mock_user_123",
-      email: "guest@qa-genius.com",
+      githubId: "local_dev_guest",
+      email: "dev@qa-genius.local",
       name: "Guest Developer",
       avatarUrl: "https://avatars.githubusercontent.com/u/0?v=4",
     });
   } catch (err) {
     console.warn(
-      "[auth] Supabase unreachable — using offline guest:",
+      "[auth] Supabase unreachable — using offline local-dev guest:",
       err instanceof Error ? err.message : err
     );
     return buildLocalDevGuest();
   }
+}
+
+/** Historical shared guest row (githubId "mock_user_123") — no longer written
+ * to by any live code path after the guest-data-isolation fix. Kept only so
+ * the one-time migration script can look it up. */
+export async function getOrCreateGuestUser(): Promise<DbUser> {
+  return upsertGithubUser({
+    githubId: "mock_user_123",
+    email: "guest@qa-genius.com",
+    name: "Guest Developer",
+    avatarUrl: "https://avatars.githubusercontent.com/u/0?v=4",
+  });
+}
+
+const PUBLIC_GUEST_PREFIX = "guest:";
+
+export function isPublicGuestId(id: string): boolean {
+  return id.startsWith(PUBLIC_GUEST_PREFIX);
+}
+
+export function newPublicGuestId(): string {
+  return `${PUBLIC_GUEST_PREFIX}${randomUUID()}`;
+}
+
+/**
+ * Virtual, never-persisted identity for an anonymous public visitor — unique
+ * per browser (the id comes from a per-browser signed cookie, see
+ * lib/guestToken.ts), reconstructed on every request without a DB call. No
+ * row in `User` ever exists for this id, which is what keeps guests isolated
+ * from each other and from the owner's own stored secrets.
+ */
+export function buildPublicGuest(id: string): DbUser {
+  const now = new Date().toISOString();
+  return {
+    id,
+    github_id: null,
+    google_id: null,
+    email: null,
+    name: "Guest",
+    avatar_url: null,
+    created_at: now,
+    last_login: now,
+    is_guest: true,
+  };
 }
 
 /** Owner/admin account — kept separate from the shared guest row so the resume
@@ -163,20 +222,23 @@ export async function getOrCreateAdminUser(email: string, name: string): Promise
 /**
  * Ensure the session user exists in Supabase before any FK-backed write.
  * Fixes stale "local-dev-guest" sessions created while the DB was offline.
+ * Never called for public guests (`isGuest`) — see ensureDbUser, which skips
+ * them entirely since they're never meant to have a DB row.
  */
 export async function resolveDbUser(sessionUser: DbUser): Promise<DbUser> {
-  // The offline guest has no fixed row — reconcile it to (or create) the real
-  // Supabase guest user. getOrCreateGuestUser() already falls back to the
-  // in-memory guest if Supabase is genuinely unreachable.
-  if (sessionUser.id === buildLocalDevGuest().id) {
-    return getOrCreateGuestUser();
+  // The local-dev placeholder has no fixed row yet — reconcile it to (or
+  // create) its own dedicated DB row. getOrCreateLocalDevUser() already
+  // falls back to the in-memory placeholder if Supabase is genuinely
+  // unreachable.
+  if (sessionUser.id === LOCAL_DEV_SENTINEL_ID) {
+    return getOrCreateLocalDevUser();
   }
 
   const existing = await findUserById(sessionUser.id);
   if (existing) return existing;
 
-  if (sessionUser.github_id === "mock_user_123") {
-    return getOrCreateGuestUser();
+  if (sessionUser.github_id === "local_dev_guest") {
+    return getOrCreateLocalDevUser();
   }
 
   if (sessionUser.github_id) {
@@ -192,12 +254,16 @@ export async function resolveDbUser(sessionUser: DbUser): Promise<DbUser> {
     return upsertGoogleUser({
       googleId: sessionUser.google_id,
       email: sessionUser.email,
+      emailVerified: true, // a stored google_id only ever came from a verified login
       name: sessionUser.name,
       avatarUrl: sessionUser.avatar_url,
     });
   }
 
-  return getOrCreateGuestUser();
+  // No fixed row, no id namespace we recognize, and Supabase doesn't have it
+  // either — there is no meaningful identity left to fall back to. Fail
+  // closed rather than silently resurrecting a shared guest account.
+  throw new Error("Unable to resolve session user in the database.");
 }
 
 export async function upsertGithubUser(profile: {
@@ -225,21 +291,60 @@ export async function upsertGithubUser(profile: {
   return mapUser(row);
 }
 
+/**
+ * Google login, with account linking: if this is the first time we've seen
+ * this googleId but the verified email already belongs to an existing row
+ * with no googleId of its own (e.g. the Admin owner account, keyed by
+ * githubId "admin_owner"), attach this googleId to that row instead of
+ * creating a duplicate identity for the same person. Restricted to Google
+ * only (never upsertGithubUser) because GitHub profile emails aren't
+ * verified, and restricted to `emailVerified` so an unverified address can't
+ * be used to claim someone else's account.
+ */
 export async function upsertGoogleUser(profile: {
   googleId: string;
   email: string | null;
+  emailVerified?: boolean;
   name: string;
   avatarUrl: string | null;
 }): Promise<DbUser> {
-  const row = await prisma.user.upsert({
-    where: { googleId: profile.googleId },
-    update: {
-      name: profile.name,
-      avatarUrl: profile.avatarUrl,
-      email: profile.email ?? undefined,
-      lastLogin: new Date(),
-    },
-    create: {
+  const byGoogleId = await prisma.user.findUnique({ where: { googleId: profile.googleId } });
+  if (byGoogleId) {
+    const updated = await prisma.user.update({
+      where: { id: byGoogleId.id },
+      data: {
+        name: profile.name,
+        avatarUrl: profile.avatarUrl,
+        email: profile.email ?? undefined,
+        lastLogin: new Date(),
+      },
+    });
+    return mapUser(updated);
+  }
+
+  if (profile.emailVerified && profile.email) {
+    const existingByEmail = await prisma.user.findFirst({
+      where: {
+        googleId: null,
+        email: { equals: profile.email, mode: "insensitive" },
+      },
+    });
+    if (existingByEmail) {
+      const linked = await prisma.user.update({
+        where: { id: existingByEmail.id },
+        data: {
+          googleId: profile.googleId,
+          name: profile.name,
+          avatarUrl: profile.avatarUrl ?? existingByEmail.avatarUrl,
+          lastLogin: new Date(),
+        },
+      });
+      return mapUser(linked);
+    }
+  }
+
+  const created = await prisma.user.create({
+    data: {
       id: randomUUID(),
       googleId: profile.googleId,
       email: profile.email,
@@ -247,7 +352,7 @@ export async function upsertGoogleUser(profile: {
       avatarUrl: profile.avatarUrl,
     },
   });
-  return mapUser(row);
+  return mapUser(created);
 }
 
 export async function getUserSettings(userId: string): Promise<DbUserSettings | null> {

@@ -24,8 +24,9 @@ router.get("/mcp/tools", (_req, res: Response) => {
 // POST /api/analyze-failure — Playwright failure + MCP/Coralogix logs + AI analysis
 router.post("/analyze-failure", async (req: Request, res: Response) => {
   const userId = (req.user as DbUser).id;
+  const isGuest = !!(req.user as DbUser).is_guest;
   const userSettings = await getUserSettings(userId);
-  const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings);
+  const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings, isGuest);
   const llmOptions = { openaiKey: extractOpenAIKeyFromRequest(req, userSettings) };
 
   const { testCode, errorOutput, featureName } = req.body as AnalyzeFailureRequest;
@@ -109,20 +110,24 @@ router.post("/analyze-failure", async (req: Request, res: Response) => {
 
     const result = await analyzeFailure(testCode ?? "", errorOutput, logs, llmOptions);
 
-    const saved = await saveLogAnalysis(userId, {
-      source: "playwright-failure",
-      featureName,
-      rawLogs: errorOutput,
-      rootCause: result.rootCause,
-      explanation: result.explanation,
-      suggestedFix: result.suggestedFix,
-      severity: "high",
-      category: "test-failure",
-      isMock: result.isMock,
-    });
+    const analysisId = isGuest
+      ? undefined
+      : (
+          await saveLogAnalysis(userId, {
+            source: "playwright-failure",
+            featureName,
+            rawLogs: errorOutput,
+            rootCause: result.rootCause,
+            explanation: result.explanation,
+            suggestedFix: result.suggestedFix,
+            severity: "high",
+            category: "test-failure",
+            isMock: result.isMock,
+          })
+        ).id;
 
     sendEvent("result", result);
-    sendEvent("done", { message: "Analysis complete", analysisId: saved.id });
+    sendEvent("done", { message: "Analysis complete", analysisId });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Analysis error";
     sendEvent("error", { message });
@@ -140,8 +145,9 @@ interface AnalyzeLogsRequest {
 
 router.post("/analyze-logs", async (req: Request, res: Response) => {
   const userId = (req.user as DbUser).id;
+  const isGuest = !!(req.user as DbUser).is_guest;
   const userSettings = await getUserSettings(userId);
-  const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings);
+  const { apiKey: coralogixKey, region } = resolveCoralogixConfig(userSettings, isGuest);
   const llmOptions = { openaiKey: extractOpenAIKeyFromRequest(req, userSettings) };
 
   const { rawLogs, source, featureName } = req.body as AnalyzeLogsRequest;
@@ -180,20 +186,24 @@ router.post("/analyze-logs", async (req: Request, res: Response) => {
 
     const result = await analyzeRawLogs(logsToAnalyze, source ?? "unknown", llmOptions);
 
-    const saved = await saveLogAnalysis(userId, {
-      source: source ?? "unknown",
-      featureName,
-      rawLogs: rawLogs.trim(),
-      rootCause: result.rootCause,
-      explanation: result.explanation,
-      suggestedFix: result.suggestedFix,
-      severity: result.severity,
-      category: result.category,
-      isMock: result.isMock,
-    });
+    const analysisId = isGuest
+      ? undefined
+      : (
+          await saveLogAnalysis(userId, {
+            source: source ?? "unknown",
+            featureName,
+            rawLogs: rawLogs.trim(),
+            rootCause: result.rootCause,
+            explanation: result.explanation,
+            suggestedFix: result.suggestedFix,
+            severity: result.severity,
+            category: result.category,
+            isMock: result.isMock,
+          })
+        ).id;
 
     sendEvent("result", result);
-    sendEvent("done", { message: "Analysis complete", analysisId: saved.id });
+    sendEvent("done", { message: "Analysis complete", analysisId });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Analysis error";
     sendEvent("error", { message });

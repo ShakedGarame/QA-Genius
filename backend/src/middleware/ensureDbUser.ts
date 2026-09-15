@@ -8,14 +8,17 @@ import type { DbUser } from "../db.js";
  *
  * passport.session() already ran deserializeUser earlier in this same request,
  * which re-fetched the user from the DB (req.isAuthenticated()/requireAuth would
- * have already rejected the request if that lookup had failed) — except for the
- * local-dev offline guest, which deserializeUser intentionally returns without a
- * DB round-trip. So only that guest id actually needs reconciling here; every
- * other session user has already been freshly validated this request.
+ * have already rejected the request if that lookup had failed) — except for two
+ * cases that deserializeUser intentionally returns without a DB round-trip:
+ * the local-dev placeholder (needs reconciling to its real, dedicated DB row
+ * — see below) and public guests (never DB-backed at all — nothing to
+ * reconcile, ever; every route that would otherwise write on their behalf
+ * branches on `req.user.is_guest` instead).
  */
 export function ensureDbUser(req: Request, res: Response, next: NextFunction) {
   const sessionUser = req.user as DbUser | undefined;
   if (!sessionUser?.id) return next();
+  if (sessionUser.is_guest) return next();
   if (sessionUser.id !== buildLocalDevGuest().id) return next();
 
   void resolveDbUser(sessionUser)

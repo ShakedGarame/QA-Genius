@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { randomUUID } from "crypto";
 import {
   createTestRun,
   updateTestRun,
@@ -6,6 +7,7 @@ import {
   getTestRunDashboardStats,
   resolveGeneratedTestId,
   type TestRunStatus,
+  type DbTestRun,
 } from "../db.js";
 import type { DbUser } from "../db.js";
 
@@ -34,6 +36,7 @@ router.get("/test-runs/stats", async (req: Request, res: Response) => {
 
 router.post("/test-runs", async (req: Request, res: Response) => {
   const userId = (req.user as DbUser).id;
+  const isGuest = !!(req.user as DbUser).is_guest;
   const {
     featureName,
     testFileName,
@@ -55,6 +58,29 @@ router.post("/test-runs", async (req: Request, res: Response) => {
   }
 
   try {
+    // Guests never get a persisted TestRun row (see guest-data-isolation
+    // design) — hand back a same-shaped, never-saved run instead.
+    if (isGuest) {
+      const now = new Date().toISOString();
+      const run: DbTestRun = {
+        id: randomUUID(),
+        user_id: userId,
+        test_file_id: testFileId ?? null,
+        feature_name: featureName.trim(),
+        test_file_name: testFileName ?? null,
+        relative_path: relativePath ?? null,
+        status: "RUNNING",
+        duration_ms: 0,
+        github_run_id: gitHubRunId != null ? String(gitHubRunId) : null,
+        runner: runner ?? "local",
+        html_url: null,
+        artifact_meta: null,
+        created_at: now,
+        updated_at: now,
+      };
+      return res.status(201).json({ success: true, run });
+    }
+
     const resolvedTestFileId =
       testFileId ?? (relativePath ? await resolveGeneratedTestId(userId, relativePath) : null);
 
@@ -69,7 +95,8 @@ router.post("/test-runs", async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, run });
   } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to create test run" });
+    console.error("[test-runs]", err);
+    res.status(500).json({ error: "Failed to create test run. Please try again." });
   }
 });
 
@@ -105,7 +132,8 @@ router.patch("/test-runs/:id", async (req: Request, res: Response) => {
     if (!run) return res.status(404).json({ error: "Test run not found" });
     res.json({ success: true, run });
   } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to update test run" });
+    console.error("[test-runs]", err);
+    res.status(500).json({ error: "Failed to update test run. Please try again." });
   }
 });
 

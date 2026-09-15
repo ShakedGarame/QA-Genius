@@ -1,11 +1,11 @@
 import { Router, Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import passport from "../passportConfig.js";
-import { getOrCreateGuestUser, getOrCreateAdminUser, getUserSettings, upsertUserSettings } from "../db.js";
+import { getOrCreateAdminUser, getUserSettings, upsertUserSettings, newPublicGuestId, buildPublicGuest } from "../db.js";
 import type { DbUser } from "../db.js";
 import { ensureDbUser } from "../middleware/ensureDbUser.js";
 import { fetchCoralogixLogs, resolveCoralogixConfig } from "../lib/coralogix.js";
-import { GUEST_COOKIE_NAME, guestToken } from "../lib/guestToken.js";
+import { GUEST_COOKIE_NAME, signGuestCookie } from "../lib/guestToken.js";
 
 const router = Router();
 
@@ -52,18 +52,22 @@ router.get("/api/auth/providers", (_req: Request, res: Response) => {
 });
 
 // ─── Mock / portfolio login (always available) ────────────────────────────────
-// Creates a deterministic "Guest Developer" session — no OAuth credentials needed.
-// Safe in production: users share the same mock_user_123 sandbox, which is ideal
-// for portfolio demos (visitors see the same pre-generated data).
+// Creates a "Continue as Guest" session for this browser — no OAuth
+// credentials needed, and no database row is ever created for it (see the
+// guest-data-isolation design doc). Each browser gets its own virtual,
+// never-persisted identity, so guests can never see each other's settings,
+// API keys, or generated data. Anything a guest generates works for real but
+// isn't saved; saving anything durable requires signing in for real.
 
 router.post("/api/auth/mock-login", async (req: Request, res: Response) => {
   try {
-    const guestUser = await getOrCreateGuestUser();
+    const guestId = newPublicGuestId();
+    const guestUser = buildPublicGuest(guestId);
 
     // Stateless safety net (see guestSession middleware): independent of the
-    // Passport session store, so guest access still works on the next
-    // request even if Supabase/the session store is unreachable.
-    res.cookie(GUEST_COOKIE_NAME, guestToken(), {
+    // Passport session store, so this specific guest still works on the next
+    // request even if the session store is unreachable.
+    res.cookie(GUEST_COOKIE_NAME, signGuestCookie(guestId), {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
@@ -244,13 +248,20 @@ router.get("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
       env_has_github_pat: !!process.env.GITHUB_ACTIONS_PAT,
     });
   } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load settings" });
+    console.error("[me/settings:get]", err);
+    res.status(500).json({ error: "Failed to load settings. Please try again." });
   }
 });
 
 router.put("/api/me/settings", ensureDbUser, async (req: Request, res: Response) => {
   const user = getUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
+  // Defense in depth: the frontend already hides Save for guests, but a
+  // guest id has no row in `User`, so writing settings for one would hit an
+  // FK violation. Fail with a clear, actionable message instead.
+  if (user.is_guest) {
+    return res.status(403).json({ error: "Sign in to save settings." });
+  }
 
   const {
     openai_api_key,
@@ -284,7 +295,8 @@ router.put("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
 
     res.json({ success: true });
   } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to save settings" });
+    console.error("[me/settings:put]", err);
+    res.status(500).json({ error: "Failed to save settings. Please try again." });
   }
 });
 
@@ -300,7 +312,9 @@ router.post("/api/me/settings/test-coralogix", ensureDbUser, async (req: Request
 
   try {
     const userSettings = await getUserSettings(user.id);
-    const stored = resolveCoralogixConfig(userSettings);
+    // Guests may still test a key they just typed in (below), but never fall
+    // back to the owner's own env-configured Coralogix key.
+    const stored = resolveCoralogixConfig(userSettings, !!user.is_guest);
 
     // Prefer a freshly-typed, not-yet-saved key over the stored one.
     const apiKey =

@@ -34,6 +34,7 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response) => {
     const userId = (req.user as DbUser).id;
+    const isGuest = !!(req.user as DbUser).is_guest;
 
     const {
       featureName,
@@ -87,23 +88,27 @@ router.post(
 
       const result = await generateManualStd(rawText, featureName.trim(), llmOptions);
 
-      const saved = await saveManualStd(userId, {
-        featureName: featureName.trim(),
-        slug: featureSlug,
-        inputType: inputType as "prd" | "swagger",
-        domain: result.domain,
-        testCases: result.testCases,
-        coverage: result.coverage,
-        model: result.model,
-        isMock: result.isMock,
-      });
+      const stdId = isGuest
+        ? undefined
+        : (
+            await saveManualStd(userId, {
+              featureName: featureName.trim(),
+              slug: featureSlug,
+              inputType: inputType as "prd" | "swagger",
+              domain: result.domain,
+              testCases: result.testCases,
+              coverage: result.coverage,
+              model: result.model,
+              isMock: result.isMock,
+            })
+          ).id;
 
       return res.json({
         success: true,
         data: result,
         featureName: featureName.trim(),
         featureSlug,
-        stdId: saved.id,
+        stdId,
         keySource,
       });
     } catch (err: unknown) {

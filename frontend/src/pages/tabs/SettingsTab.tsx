@@ -16,11 +16,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 
-// Shared demo account — every anonymous visitor lands on this profile, so
-// integration credentials must stay read-only or one guest could overwrite
-// what every other guest (and the resume owner) sees.
-const GUEST_EMAIL = "guest@qa-genius.com";
-
 // The repository this QA-Genius instance is wired to — used as the default
 // value for the GitHub Issues repo field so users don't have to type it.
 const PLATFORM_GITHUB_REPO = "ShakedGarame/QA-Genius";
@@ -174,7 +169,9 @@ function Section({
 
 export default function SettingsTab() {
   const { user } = useAuth();
-  const isGuest = user?.email?.toLowerCase() === GUEST_EMAIL;
+  // Guests are a virtual, never-persisted identity with no real email —
+  // every real login (GitHub/Google/Admin) always has one.
+  const isGuest = !user?.email;
 
   if (import.meta.env.DEV) {
     console.debug("[SettingsTab] user.email:", user?.email, "isGuest:", isGuest);

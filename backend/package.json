@@ -9,7 +9,8 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:deploy": "prisma db push --skip-generate",
-    "hash-password": "node scripts/hash-password.mjs"
+    "hash-password": "node scripts/hash-password.mjs",
+    "migrate-guest-to-owner": "node scripts/migrate-guest-to-owner.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",

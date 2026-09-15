@@ -43,6 +43,7 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response) => {
     const userId = (req.user as DbUser).id;
+    const isGuest = !!(req.user as DbUser).is_guest;
 
     const {
       featureName,
@@ -93,8 +94,10 @@ router.post(
           description: `${swagger.title} v${swagger.version} — ${swagger.endpoints.length} endpoints`,
         };
 
-        await upsertFeatureMeta(userId, meta);
-        await saveGeneratedTest(userId, featureSlug, specFileName, result.code);
+        if (!isGuest) {
+          await upsertFeatureMeta(userId, meta);
+          await saveGeneratedTest(userId, featureSlug, specFileName, result.code);
+        }
 
         return res.json({
           success: true,
@@ -128,8 +131,10 @@ router.post(
         description: parsedPrd.userStories.map((s) => s.title).join("; ").slice(0, 200),
       };
 
-      await upsertFeatureMeta(userId, meta);
-      await saveGeneratedTest(userId, featureSlug, specFileName, result.code);
+      if (!isGuest) {
+        await upsertFeatureMeta(userId, meta);
+        await saveGeneratedTest(userId, featureSlug, specFileName, result.code);
+      }
 
       return res.json({
         success: true,

@@ -88,12 +88,19 @@ export async function fetchCoralogixLogs(
   });
 }
 
-/** Resolves the effective Coralogix API key + region: user settings take priority over env vars. */
-export function resolveCoralogixConfig(userSettings: DbUserSettings | null): {
+/**
+ * Resolves the effective Coralogix API key + region: user settings take priority over env vars.
+ * Anonymous guests never get the env-configured key — that's the site owner's own credential,
+ * not a shared demo secret (see guest-data-isolation design doc).
+ */
+export function resolveCoralogixConfig(
+  userSettings: DbUserSettings | null,
+  isGuest = false
+): {
   apiKey: string | null;
   region: string;
 } {
-  const apiKey = userSettings?.coralogix_api_key || process.env.CORALOGIX_API_KEY || null;
+  const apiKey = userSettings?.coralogix_api_key || (isGuest ? null : process.env.CORALOGIX_API_KEY) || null;
   const region = userSettings?.coralogix_region ?? process.env.CORALOGIX_REGION ?? "EU";
   return { apiKey, region };
 }

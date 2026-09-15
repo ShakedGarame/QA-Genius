@@ -25,23 +25,28 @@ router.post("/issues/github/create", async (req: Request, res: Response) => {
     labels?: string[];
   };
 
-  // Header token (user's stored PAT) takes priority, then user settings, then server env.
+  const user = getUser(req);
+  const isGuest = !!user?.is_guest;
+
+  // Header token (user's own PAT) always allowed — it's their own credential,
+  // not the owner's. The env-configured token is the owner's personal PAT,
+  // so guests never fall back to it (see guest-data-isolation design doc).
   const token =
     (req.headers["x-github-token"] as string | undefined) ||
     (req.headers["x-user-github-token"] as string | undefined) ||
-    process.env.GITHUB_ISSUES_TOKEN ||
-    process.env.GITHUB_TOKEN;
+    (isGuest ? undefined : process.env.GITHUB_ISSUES_TOKEN) ||
+    (isGuest ? undefined : process.env.GITHUB_TOKEN);
 
   // Repo: user settings win over env var (enables per-user targeting).
-  const user = getUser(req);
   const settings = user ? await getUserSettings(user.id) : null;
   const rawRepo = settings?.github_issues_repo || process.env.GITHUB_ISSUES_REPO;
   const repo = rawRepo ? normalizeGithubRepo(rawRepo) : rawRepo;
 
   if (!token) {
     return res.status(503).json({
-      error:
-        "GitHub token not configured. Set GITHUB_ISSUES_TOKEN in your environment, or add a GitHub PAT in Settings.",
+      error: isGuest
+        ? "Sign in to file a GitHub issue, or paste your own GitHub token in Settings."
+        : "GitHub token not configured. Set GITHUB_ISSUES_TOKEN in your environment, or add a GitHub PAT in Settings.",
     });
   }
   if (!repo) {
@@ -83,9 +88,8 @@ router.post("/issues/github/create", async (req: Request, res: Response) => {
       issueNumber: data.number,
     });
   } catch (err: unknown) {
-    return res
-      .status(500)
-      .json({ error: err instanceof Error ? err.message : "Failed to create GitHub issue" });
+    console.error("[issues/github/create]", err);
+    return res.status(500).json({ error: "Failed to create GitHub issue. Please try again." });
   }
 });
 
@@ -146,16 +150,21 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
     projectKey: string;
   };
 
-  // User settings take priority over env vars for Jira credentials.
+  // User settings take priority over env vars for Jira credentials. The env
+  // vars are the owner's own personal Jira credentials, so guests never fall
+  // back to them (see guest-data-isolation design doc) — and since guests
+  // have no persisted settings row either, this makes Jira filing require
+  // signing in for them, full stop.
   const user = getUser(req);
+  const isGuest = !!user?.is_guest;
   const settings = user ? await getUserSettings(user.id) : null;
 
-  const email = settings?.jira_email || process.env.JIRA_EMAIL;
-  const apiToken = settings?.jira_api_token || process.env.JIRA_API_TOKEN;
+  const email = settings?.jira_email || (isGuest ? undefined : process.env.JIRA_EMAIL);
+  const apiToken = settings?.jira_api_token || (isGuest ? undefined : process.env.JIRA_API_TOKEN);
 
   // Settings stores a hostname or a pasted Jira URL (e.g. a board link);
   // env var stores just the subdomain (e.g. "myco") for backwards compat.
-  const rawDomain = settings?.jira_domain || process.env.JIRA_DOMAIN;
+  const rawDomain = settings?.jira_domain || (isGuest ? undefined : process.env.JIRA_DOMAIN);
   const domain = rawDomain
     ? rawDomain.includes(".")
       ? normalizeJiraDomain(rawDomain)
@@ -164,8 +173,9 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
 
   if (!email || !apiToken || !domain) {
     return res.status(503).json({
-      error:
-        "Jira not configured. Add your Jira Domain, Account Email, and API Token in Settings → Jira Cloud Integration.",
+      error: isGuest
+        ? "Sign in to file Jira tickets."
+        : "Jira not configured. Add your Jira Domain, Account Email, and API Token in Settings → Jira Cloud Integration.",
     });
   }
 
@@ -232,9 +242,8 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
       issueKey,
     });
   } catch (err: unknown) {
-    return res
-      .status(500)
-      .json({ error: err instanceof Error ? err.message : "Failed to create Jira ticket" });
+    console.error("[issues/jira/create]", err);
+    return res.status(500).json({ error: "Failed to create Jira ticket. Please try again." });
   }
 });
 

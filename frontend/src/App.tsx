@@ -40,17 +40,13 @@ export default function App() {
     );
   }
 
-  // Skip login screen on localhost — backend auto-signs in as Guest Developer
-  if ((status === "unauthenticated" || !user) && !isLocalDev) {
+  // On localhost, useAuth() keeps retrying (status stays "loading") while the
+  // backend auto-signs in as Guest Developer, so this normally never fires
+  // there. It does fire — correctly — when auto-login is off
+  // (LOCAL_DEV_AUTO_LOGIN=0) or genuinely fails, so the login screen must
+  // still render on localhost rather than spinning forever.
+  if (status === "unauthenticated" || !user) {
     return <LoginPage onLoginSuccess={refresh} />;
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-surface-900 flex items-center justify-center">
-        <div className="w-10 h-10 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
-      </div>
-    );
   }
 
   return <AppLayout user={user} onLogout={logout} />;

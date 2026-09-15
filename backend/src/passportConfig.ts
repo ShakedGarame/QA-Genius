@@ -2,7 +2,14 @@ import passport from "passport";
 import { Strategy as GitHubStrategy, Profile as GitHubProfile } from "passport-github2";
 import { Strategy as GoogleStrategy, Profile as GoogleProfile } from "passport-google-oauth20";
 import { VerifyCallback } from "passport-oauth2";
-import { findUserById, upsertGithubUser, upsertGoogleUser, buildLocalDevGuest, getOrCreateGuestUser } from "./db.js";
+import {
+  findUserById,
+  upsertGithubUser,
+  upsertGoogleUser,
+  buildLocalDevGuest,
+  isPublicGuestId,
+  buildPublicGuest,
+} from "./db.js";
 
 const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
 
@@ -11,13 +18,18 @@ passport.serializeUser((user, done) => {
 });
 
 passport.deserializeUser(async (id: string, done) => {
-  // Fast path: the offline guest id is a sentinel that never exists as a real
-  // row (see buildLocalDevGuest) — looking it up would just fail against
-  // Supabase and deauthenticate the request. Applies in every environment:
-  // production sessions fall back to this same id whenever Supabase was
-  // unreachable at login time (see getOrCreateGuestUser).
+  // Fast path 1: the local-dev placeholder id is a sentinel that never
+  // exists as a real row until ensureDbUser reconciles it (see
+  // buildLocalDevGuest) — looking it up would just fail against Supabase and
+  // deauthenticate the request.
   if (id === buildLocalDevGuest().id) {
     return done(null, buildLocalDevGuest());
+  }
+
+  // Fast path 2: public guests are *never* DB-backed by design — every
+  // `guest:`-prefixed id is reconstructed directly, with no row to look up.
+  if (isPublicGuestId(id)) {
+    return done(null, buildPublicGuest(id));
   }
 
   try {
@@ -75,10 +87,11 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
       },
       async (_accessToken: string, _refreshToken: string, profile: GoogleProfile, done: VerifyCallback) => {
         try {
-          const email = profile.emails?.[0]?.value ?? null;
+          const primaryEmail = profile.emails?.[0];
           const user = await upsertGoogleUser({
             googleId: profile.id,
-            email,
+            email: primaryEmail?.value ?? null,
+            emailVerified: primaryEmail?.verified === true,
             name: profile.displayName ?? "Google User",
             avatarUrl: profile.photos?.[0]?.value ?? null,
           });

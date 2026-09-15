@@ -27,7 +27,9 @@ const child = spawn(
     cwd: root,
     stdio: "inherit",
     shell: true,
-    env: { ...process.env, LOCAL_DEV_AUTO_LOGIN: "1" },
+    // Default guest auto-login on for convenience, but respect an explicit
+    // override (e.g. LOCAL_DEV_AUTO_LOGIN=0 to test real logins locally).
+    env: { LOCAL_DEV_AUTO_LOGIN: "1", ...process.env },
   }
 );
 

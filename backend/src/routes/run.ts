@@ -301,6 +301,7 @@ router.get("/run-test/cloud-logs/:runId", async (req: Request, res: Response) =>
 
 router.post("/run-test", async (req: Request, res: Response) => {
   const userId = (req.user as DbUser).id;
+  const isGuest = !!(req.user as DbUser).is_guest;
   const body = req.body as RunTestRequest;
 
   if (!body.code && !body.fileName && !body.relativePath) {
@@ -313,15 +314,24 @@ router.post("/run-test", async (req: Request, res: Response) => {
   res.setHeader("X-Accel-Buffering", "no");
 
   const id = body.testId ?? uuidv4();
-  const runMeta = await buildTestRunMeta(userId, body);
-  const dbRun = await createTestRun(userId, {
-    testFileId: runMeta.testFileId,
-    featureName: runMeta.featureName,
-    testFileName: runMeta.testFileName,
-    relativePath: runMeta.relativePath,
-    runner: shouldRunViaGitHubActions(req) ? "github-actions" : "local",
-  });
-  const dbRunId = dbRun.id;
+  // Guests never get a persisted TestRun row (see guest-data-isolation design) —
+  // synthesize an id so downstream SSE/polling code, which only ever reads
+  // dbRunId, works unmodified. updateTestRun() below already no-ops cleanly
+  // for an id that doesn't exist in the DB.
+  let dbRunId: string;
+  if (isGuest) {
+    dbRunId = uuidv4();
+  } else {
+    const runMeta = await buildTestRunMeta(userId, body);
+    const dbRun = await createTestRun(userId, {
+      testFileId: runMeta.testFileId,
+      featureName: runMeta.featureName,
+      testFileName: runMeta.testFileName,
+      relativePath: runMeta.relativePath,
+      runner: shouldRunViaGitHubActions(req) ? "github-actions" : "local",
+    });
+    dbRunId = dbRun.id;
+  }
 
   if (shouldRunViaGitHubActions(req)) {
     await runViaGitHubActions(req, res, userId, body, id, dbRunId);
