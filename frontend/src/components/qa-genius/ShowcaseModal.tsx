@@ -23,15 +23,33 @@ export default function ShowcaseModal({ title, publish, onClose }: ShowcaseModal
   const [isRevoking, setIsRevoking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // POST /api/showcase isn't idempotent — a duplicate call publishes a second,
-  // orphaned link. Guards against React StrictMode's dev-only double-invoke of
-  // this effect (the `cancelled` flag below only skips the resulting setState,
-  // not the in-flight request itself).
+  // orphaned link. hasFiredRef guards against React StrictMode's dev-only
+  // double-invoke of the effect below, so the fetch fires exactly once ever.
+  //
+  // isMountedRef (tracked by its own effect, not tied to this one's cleanup)
+  // is what the fetch's .then/.catch/.finally check before calling setState.
+  // A naive per-invocation `cancelled` closure doesn't work together with
+  // hasFiredRef: StrictMode's phantom mount→cleanup→remount runs synchronously,
+  // so if hasFiredRef blocks the second invocation, the FIRST invocation's
+  // cleanup still fires (marking its own `cancelled` true) — permanently
+  // suppressing the one real fetch's result even though the request itself
+  // succeeded server-side. isMountedRef sidesteps this: it's flipped back to
+  // true by the second (phantom-remount) invocation of the mount-tracking
+  // effect well before any real network response can arrive, and only stays
+  // false after a genuine, lasting unmount (e.g. the user closes the modal).
   const hasFiredRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (hasFiredRef.current) return;
     hasFiredRef.current = true;
-    let cancelled = false;
     setIsPublishing(true);
     setError(null);
     fetch("/api/showcase", {
@@ -43,17 +61,14 @@ export default function ShowcaseModal({ title, publish, onClose }: ShowcaseModal
       .then(async (res) => {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Failed to publish showcase link");
-        if (!cancelled) setLink(json.showcaseLink as ShowcaseLinkRecord);
+        if (isMountedRef.current) setLink(json.showcaseLink as ShowcaseLinkRecord);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to publish showcase link");
+        if (isMountedRef.current) setError(e instanceof Error ? e.message : "Failed to publish showcase link");
       })
       .finally(() => {
-        if (!cancelled) setIsPublishing(false);
+        if (isMountedRef.current) setIsPublishing(false);
       });
-    return () => {
-      cancelled = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `publish` is a fresh object each render; the fire-once ref above is the real guard.
   }, []);
 
