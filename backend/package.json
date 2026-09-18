@@ -32,7 +32,8 @@
     "passport-google-oauth20": "^2.0.0",
     "pdfjs-dist": "^6.1.200",
     "pg": "^8.16.3",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
