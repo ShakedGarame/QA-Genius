@@ -799,7 +799,11 @@ export default function HistoryTab() {
       )}
 
       {sharingStd && (
-        <ShowcaseModal std={sharingStd} onClose={() => setSharingStd(null)} />
+        <ShowcaseModal
+          title={sharingStd.feature_name}
+          publish={{ artifactType: "manual_std", sourceId: sharingStd.id }}
+          onClose={() => setSharingStd(null)}
+        />
       )}
     </div>
   );

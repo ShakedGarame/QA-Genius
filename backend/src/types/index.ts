@@ -193,8 +193,7 @@ export interface ManualStdRecord {
   created_at: string;
 }
 
-/** Only artifact type supported so far — see ShowcaseLink model comment. */
-export type ShowcaseArtifactType = "manual_std";
+export type ShowcaseArtifactType = "manual_std" | "feature_test";
 
 export interface ShowcaseManualStdSnapshot {
   featureName: string;
@@ -203,6 +202,16 @@ export interface ShowcaseManualStdSnapshot {
   coverage: StdCoverageRow[];
   model: string;
   isMock: boolean;
+}
+
+export interface ShowcaseFeatureTestSnapshot {
+  featureName: string;
+  description: string | null;
+  prdText: string | null;
+  inputType: InputType;
+  fileName: string;
+  code: string;
+  latestRun: { status: "PASSED" | "FAILED"; durationMs: number; ranAt: string } | null;
 }
 
 export interface ShowcaseLinkRecord {
@@ -221,7 +230,7 @@ export interface ShowcasePublicView {
   artifact_type: ShowcaseArtifactType;
   title: string;
   created_at: string;
-  snapshot: ShowcaseManualStdSnapshot;
+  snapshot: ShowcaseManualStdSnapshot | ShowcaseFeatureTestSnapshot;
 }
 
 export interface SelfHealStats {

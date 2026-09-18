@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { Share2, X, Loader2, Ban, ExternalLink } from "lucide-react";
-import { ManualStdRecord, ShowcaseLinkRecord } from "../../types";
+import { ShowcaseLinkRecord } from "../../types";
 import { CopyButton } from "../ui/FullscreenModal";
 
+export type ShowcasePublishRequest =
+  | { artifactType: "manual_std"; sourceId: string }
+  | { artifactType: "feature_test"; featureSlug: string; fileName: string };
+
 interface ShowcaseModalProps {
-  std: ManualStdRecord;
+  /** Display name shown in the confirmation copy — the STD's or feature's name. */
+  title: string;
+  publish: ShowcasePublishRequest;
   onClose: () => void;
 }
 
-/** Publishes (or reuses) a public, no-login showcase link for a Manual STD — a
- * "case study" URL anyone can open without signing into the app. */
-export default function ShowcaseModal({ std, onClose }: ShowcaseModalProps) {
+/** Publishes (or reuses) a public, no-login showcase link for a Manual STD or a
+ * generated test file — a "case study" URL anyone can open without signing into
+ * the app. */
+export default function ShowcaseModal({ title, publish, onClose }: ShowcaseModalProps) {
   const [link, setLink] = useState<ShowcaseLinkRecord | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
@@ -31,7 +38,7 @@ export default function ShowcaseModal({ std, onClose }: ShowcaseModalProps) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ artifactType: "manual_std", sourceId: std.id }),
+      body: JSON.stringify(publish),
     })
       .then(async (res) => {
         const json = await res.json();
@@ -47,7 +54,8 @@ export default function ShowcaseModal({ std, onClose }: ShowcaseModalProps) {
     return () => {
       cancelled = true;
     };
-  }, [std.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `publish` is a fresh object each render; the fire-once ref above is the real guard.
+  }, []);
 
   const handleRevoke = async () => {
     if (!link) return;
@@ -88,7 +96,7 @@ export default function ShowcaseModal({ std, onClose }: ShowcaseModalProps) {
 
         <div className="px-5 py-5 space-y-4">
           <p className="text-xs text-slate-400 leading-relaxed">
-            Anyone with this link can view a read-only page of <span className="text-slate-200">{std.feature_name}</span>{" "}
+            Anyone with this link can view a read-only page of <span className="text-slate-200">{title}</span>{" "}
             — no login required. They won't see any other data in your account.
           </p>
 

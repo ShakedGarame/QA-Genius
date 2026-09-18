@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import {
   getManualStdById,
   createManualStdShowcase,
+  createFeatureTestShowcase,
   listShowcaseLinks,
   revokeShowcaseLink,
   getShowcaseBySlug,
@@ -45,16 +46,32 @@ router.post("/showcase", async (req: Request, res: Response) => {
     return res.status(403).json({ error: "Sign in to publish a showcase link." });
   }
 
-  const { artifactType, sourceId } = req.body as { artifactType?: string; sourceId?: string };
-  if (artifactType !== "manual_std" || !sourceId) {
-    return res.status(400).json({ error: "artifactType must be 'manual_std' and sourceId is required" });
-  }
+  const body = req.body as {
+    artifactType?: string;
+    sourceId?: string;
+    featureSlug?: string;
+    fileName?: string;
+  };
 
   try {
-    const std = await getManualStdById(user.id, sourceId);
-    if (!std) throw new AppError(404, "STD not found");
-    const link = await createManualStdShowcase(user.id, std);
-    return res.json({ success: true, showcaseLink: link });
+    if (body.artifactType === "manual_std") {
+      if (!body.sourceId) return res.status(400).json({ error: "sourceId is required" });
+      const std = await getManualStdById(user.id, body.sourceId);
+      if (!std) throw new AppError(404, "STD not found");
+      const link = await createManualStdShowcase(user.id, std);
+      return res.json({ success: true, showcaseLink: link });
+    }
+
+    if (body.artifactType === "feature_test") {
+      if (!body.featureSlug || !body.fileName) {
+        return res.status(400).json({ error: "featureSlug and fileName are required" });
+      }
+      const link = await createFeatureTestShowcase(user.id, body.featureSlug, body.fileName);
+      if (!link) throw new AppError(404, "Test file not found");
+      return res.json({ success: true, showcaseLink: link });
+    }
+
+    return res.status(400).json({ error: "artifactType must be 'manual_std' or 'feature_test'" });
   } catch (err: unknown) {
     sendError(res, req, err, { safeMessage: "Failed to publish showcase link" });
   }

@@ -16,6 +16,7 @@ import type {
   ShowcaseArtifactType,
   ShowcaseLinkRecord,
   ShowcaseManualStdSnapshot,
+  ShowcaseFeatureTestSnapshot,
   ShowcasePublicView,
   SelfHealStats,
   FlakyTestEntry,
@@ -836,6 +837,60 @@ export async function createManualStdShowcase(
       artifactType: "manual_std",
       sourceId: std.id,
       title: std.feature_name,
+      snapshot: snapshot as unknown as Prisma.InputJsonValue,
+    },
+  });
+  return mapShowcaseLink(row);
+}
+
+/** Publishes one generated Playwright test file (PRD → AI-generated code → most
+ * recent execution result) as a public showcase link. Same snapshot-at-publish-time
+ * approach as createManualStdShowcase. Returns null if the feature/file doesn't
+ * exist or belong to this user. */
+export async function createFeatureTestShowcase(
+  userId: string,
+  featureSlug: string,
+  fileName: string
+): Promise<ShowcaseLinkRecord | null> {
+  const feature = await prisma.feature.findUnique({
+    where: { userId_slug: { userId, slug: featureSlug } },
+    include: { tests: { where: { fileName } } },
+  });
+  const test = feature?.tests[0];
+  if (!feature || !test) return null;
+
+  const latestRun = await prisma.testRun.findFirst({
+    where: {
+      userId,
+      status: { in: ["PASSED", "FAILED"] },
+      OR: [{ testFileId: test.id }, { relativePath: `${featureSlug}/${fileName}` }],
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const snapshot: ShowcaseFeatureTestSnapshot = {
+    featureName: feature.featureName,
+    description: feature.description,
+    prdText: feature.prdText,
+    inputType: feature.inputType as InputType,
+    fileName: test.fileName,
+    code: test.code,
+    latestRun: latestRun
+      ? {
+          status: latestRun.status as "PASSED" | "FAILED",
+          durationMs: latestRun.durationMs,
+          ranAt: latestRun.createdAt.toISOString(),
+        }
+      : null,
+  };
+
+  const row = await prisma.showcaseLink.create({
+    data: {
+      userId,
+      slug: generateShowcaseSlug(),
+      artifactType: "feature_test",
+      sourceId: test.id,
+      title: `${feature.featureName} — ${test.fileName}`,
       snapshot: snapshot as unknown as Prisma.InputJsonValue,
     },
   });

@@ -3,7 +3,7 @@ import {
   RefreshCw, Play, Trash2, FileCode2, Loader2,
   Globe, FileText, FlaskConical,
   ChevronDown, ChevronRight, Search,
-  ClipboardList, Eye, Download,
+  ClipboardList, Eye, Download, Share2,
 } from "lucide-react";
 import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
@@ -13,6 +13,7 @@ import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
 import { routeRunToGenerator } from "../../lib/cloudRunner";
 import { exportStdToPdf } from "../../lib/exportStd";
 import ManualStdTable from "../../components/qa-genius/ManualStdTable";
+import ShowcaseModal from "../../components/qa-genius/ShowcaseModal";
 import {
   TabToolbar,
   TabContent,
@@ -136,11 +137,12 @@ interface FeatureCardProps {
   onRunFile: (file: TestFileInfo, isMock: boolean) => void;
   onDeleteFile: (file: TestFileInfo) => void;
   onDeleteFeature: (slug: string) => void;
+  onShareFile: (file: TestFileInfo) => void;
   isMock?: boolean;
   runningPath: string | null;
 }
 
-function FeatureCard({ group, onViewFile, onRunFile, onDeleteFile, onDeleteFeature, isMock = false, runningPath }: FeatureCardProps) {
+function FeatureCard({ group, onViewFile, onRunFile, onDeleteFile, onDeleteFeature, onShareFile, isMock = false, runningPath }: FeatureCardProps) {
   const [expanded, setExpanded] = useState(true);
   const { meta, tests } = group;
 
@@ -225,6 +227,15 @@ function FeatureCard({ group, onViewFile, onRunFile, onDeleteFile, onDeleteFeatu
                   >
                     {runningPath === file.relativePath ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                   </button>
+                  {!isMock && (
+                    <button
+                      onClick={() => onShareFile(file)}
+                      title="Share public link"
+                      className="p-1.5 rounded hover:bg-surface-600 text-slate-500 hover:text-sky-400 transition-colors"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   {!isMock && (
                     <button
                       onClick={() => onDeleteFile(file)}
@@ -334,6 +345,7 @@ export default function TestRepositoryTab() {
   const [runningPath, setRunningPath] = useState<string | null>(null);
   const [codeViewFile, setCodeViewFile] = useState<{ file: TestFileInfo; isMock: boolean } | null>(null);
   const [viewingStd, setViewingStd] = useState<ManualStdRecord | null>(null);
+  const [sharingFile, setSharingFile] = useState<TestFileInfo | null>(null);
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { refreshStds(); }, [refreshStds]);
@@ -487,6 +499,7 @@ export default function TestRepositoryTab() {
                   onRunFile={handleRunFile}
                   onDeleteFile={handleDeleteFile}
                   onDeleteFeature={handleDeleteFeature}
+                  onShareFile={setSharingFile}
                 />
               ))}
             </div>
@@ -533,6 +546,14 @@ export default function TestRepositoryTab() {
 
       {viewingStd && (
         <ManualStdViewerModal std={viewingStd} onClose={() => setViewingStd(null)} />
+      )}
+
+      {sharingFile && (
+        <ShowcaseModal
+          title={`${sharingFile.featureName} — ${sharingFile.fileName}`}
+          publish={{ artifactType: "feature_test", featureSlug: sharingFile.featureSlug, fileName: sharingFile.fileName }}
+          onClose={() => setSharingFile(null)}
+        />
       )}
     </div>
   );
