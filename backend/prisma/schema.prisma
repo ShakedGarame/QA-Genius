@@ -20,10 +20,11 @@ model User {
   lastLogin  DateTime @default(now()) @map("last_login")
 
   settings    UserSettings?
-  features    Feature[]
-  logAnalyses LogAnalysis[]
-  testRuns    TestRun[]
-  manualStds  ManualStd[]
+  features      Feature[]
+  logAnalyses   LogAnalysis[]
+  testRuns      TestRun[]
+  manualStds    ManualStd[]
+  showcaseLinks ShowcaseLink[]
 
   @@map("users")
 }
@@ -141,6 +142,28 @@ model ManualStd {
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("manual_stds")
+}
+
+/// A public, no-login "case study" view onto one artifact the owner chose to publish
+/// (currently only a ManualStd). `snapshot` is a denormalized, sanitized copy taken at
+/// publish time — the public GET never joins back to the live ManualStd row, so editing
+/// or deleting the original afterwards can't change or break an already-shared link.
+model ShowcaseLink {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  slug         String    @unique
+  artifactType String    @map("artifact_type")
+  sourceId     String    @map("source_id")
+  title        String
+  snapshot     Json
+  viewCount    Int       @default(0) @map("view_count")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  revokedAt    DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("showcase_links")
 }
 
 /// Owned by connect-pg-simple (the express-session store in app.ts), not by

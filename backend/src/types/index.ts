@@ -192,3 +192,34 @@ export interface ManualStdRecord {
   is_mock: boolean;
   created_at: string;
 }
+
+/** Only artifact type supported so far — see ShowcaseLink model comment. */
+export type ShowcaseArtifactType = "manual_std";
+
+export interface ShowcaseManualStdSnapshot {
+  featureName: string;
+  domain: StdDomain;
+  testCases: ManualStdTestCase[];
+  coverage: StdCoverageRow[];
+  model: string;
+  isMock: boolean;
+}
+
+export interface ShowcaseLinkRecord {
+  id: string;
+  slug: string;
+  artifact_type: ShowcaseArtifactType;
+  source_id: string;
+  title: string;
+  view_count: number;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export interface ShowcasePublicView {
+  slug: string;
+  artifact_type: ShowcaseArtifactType;
+  title: string;
+  created_at: string;
+  snapshot: ShowcaseManualStdSnapshot;
+}

@@ -1,8 +1,11 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
 import AppLayout from "./components/Layout/AppLayout";
 import LoginPage from "./pages/LoginPage";
+import ShowcasePage from "./pages/ShowcasePage";
 
-export default function App() {
+/** The authenticated app shell — everything that requires a QA-Genius session. */
+function AuthGate() {
   const { status, user, logout, refresh, isLocalDev, isBackendDown } = useAuth();
 
   if (status === "loading") {
@@ -50,4 +53,16 @@ export default function App() {
   }
 
   return <AppLayout user={user} onLogout={logout} />;
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Public — no auth check, reachable without a QA-Genius session. */}
+        <Route path="/showcase/:slug" element={<ShowcasePage />} />
+        <Route path="*" element={<AuthGate />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }

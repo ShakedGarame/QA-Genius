@@ -3,7 +3,7 @@ import {
   FileCode2, Globe, FileText, ChevronDown, ChevronRight,
   Loader2, Play, Eye, Trash2, RefreshCw, CalendarDays,
   Layers, Search, FlaskConical, ClipboardList, Download,
-  BrainCircuit, AlertTriangle, Wrench, ScrollText,
+  BrainCircuit, AlertTriangle, Wrench, ScrollText, Share2,
 } from "lucide-react";
 import clsx from "clsx";
 import { useTestRepository } from "../../hooks/useTestRepository";
@@ -14,6 +14,7 @@ import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
 import { routeRunToRepository } from "../../lib/cloudRunner";
 import { exportStdToPdf } from "../../lib/exportStd";
 import ManualStdTable from "../../components/qa-genius/ManualStdTable";
+import ShowcaseModal from "../../components/qa-genius/ShowcaseModal";
 import {
   TabToolbar,
   TabContent,
@@ -324,10 +325,11 @@ interface ManualStdHistoryCardProps {
   onView: () => void;
   onDownload: () => void;
   onDelete: () => void;
+  onShare: () => void;
   isDownloading: boolean;
 }
 
-function ManualStdHistoryCard({ std, onView, onDownload, onDelete, isDownloading }: ManualStdHistoryCardProps) {
+function ManualStdHistoryCard({ std, onView, onDownload, onDelete, onShare, isDownloading }: ManualStdHistoryCardProps) {
   return (
     <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50 transition-all">
       <div className="flex flex-col sm:flex-row sm:items-start gap-3 p-4 sm:p-5 bg-surface-800/40">
@@ -393,6 +395,13 @@ function ManualStdHistoryCard({ std, onView, onDownload, onDelete, isDownloading
               className="p-2 rounded-lg hover:bg-surface-600 text-slate-500 hover:text-slate-200 transition-colors disabled:opacity-50"
             >
               {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={onShare}
+              title="Share public link"
+              className="p-2 rounded-lg hover:bg-surface-600 text-slate-500 hover:text-sky-400 transition-colors"
+            >
+              <Share2 className="w-4 h-4" />
             </button>
           </div>
           <button
@@ -542,6 +551,7 @@ export default function HistoryTab() {
   const { stds, isLoading: stdsLoading, error: stdsError, refresh: refreshStds, deleteStd } = useManualStds();
   const [codeViewFile, setCodeViewFile] = useState<{ file: TestFileInfo; isMock: boolean } | null>(null);
   const [viewingStd, setViewingStd] = useState<ManualStdRecord | null>(null);
+  const [sharingStd, setSharingStd] = useState<ManualStdRecord | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
@@ -743,6 +753,7 @@ export default function HistoryTab() {
                   onView={() => setViewingStd(std)}
                   onDownload={() => handleDownloadStd(std)}
                   onDelete={() => handleDeleteStd(std)}
+                  onShare={() => setSharingStd(std)}
                   isDownloading={downloadingId === std.id}
                 />
               ))}
@@ -785,6 +796,10 @@ export default function HistoryTab() {
 
       {viewingStd && (
         <ManualStdViewerModal std={viewingStd} onClose={() => setViewingStd(null)} />
+      )}
+
+      {sharingStd && (
+        <ShowcaseModal std={sharingStd} onClose={() => setSharingStd(null)} />
       )}
     </div>
   );

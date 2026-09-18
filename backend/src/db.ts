@@ -1,7 +1,7 @@
 /**
  * PostgreSQL data layer (Supabase) — users, settings, features, tests, log analyses.
  */
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "./prisma.js";
 import type {
@@ -13,6 +13,10 @@ import type {
   ManualStdTestCase,
   StdCoverageRow,
   StdDomain,
+  ShowcaseArtifactType,
+  ShowcaseLinkRecord,
+  ShowcaseManualStdSnapshot,
+  ShowcasePublicView,
 } from "./types/index.js";
 
 export interface DbUser {
@@ -779,6 +783,98 @@ export async function getManualStdById(userId: string, id: string): Promise<Manu
 export async function deleteManualStd(userId: string, id: string): Promise<boolean> {
   const result = await prisma.manualStd.deleteMany({ where: { id, userId } });
   return result.count > 0;
+}
+
+// ─── Showcase links (public, no-login case-study views) ──────────────────────
+
+function generateShowcaseSlug(): string {
+  return randomBytes(9).toString("base64url");
+}
+
+function mapShowcaseLink(row: {
+  id: string;
+  slug: string;
+  artifactType: string;
+  sourceId: string;
+  title: string;
+  viewCount: number;
+  createdAt: Date;
+  revokedAt: Date | null;
+}): ShowcaseLinkRecord {
+  return {
+    id: row.id,
+    slug: row.slug,
+    artifact_type: row.artifactType as ShowcaseArtifactType,
+    source_id: row.sourceId,
+    title: row.title,
+    view_count: row.viewCount,
+    created_at: row.createdAt.toISOString(),
+    revoked_at: row.revokedAt ? row.revokedAt.toISOString() : null,
+  };
+}
+
+/** Publishes a ManualStd as a public showcase link. Snapshots the content at publish
+ * time (see ShowcaseLink model comment) rather than referencing the live row. */
+export async function createManualStdShowcase(
+  userId: string,
+  std: ManualStdRecord
+): Promise<ShowcaseLinkRecord> {
+  const snapshot: ShowcaseManualStdSnapshot = {
+    featureName: std.feature_name,
+    domain: std.domain,
+    testCases: std.test_cases,
+    coverage: std.coverage,
+    model: std.model,
+    isMock: std.is_mock,
+  };
+  const row = await prisma.showcaseLink.create({
+    data: {
+      userId,
+      slug: generateShowcaseSlug(),
+      artifactType: "manual_std",
+      sourceId: std.id,
+      title: std.feature_name,
+      snapshot: snapshot as unknown as Prisma.InputJsonValue,
+    },
+  });
+  return mapShowcaseLink(row);
+}
+
+export async function listShowcaseLinks(userId: string): Promise<ShowcaseLinkRecord[]> {
+  const rows = await prisma.showcaseLink.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map(mapShowcaseLink);
+}
+
+export async function revokeShowcaseLink(userId: string, id: string): Promise<boolean> {
+  const result = await prisma.showcaseLink.updateMany({
+    where: { id, userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  return result.count > 0;
+}
+
+/** Public read — no userId scoping, this is what an unauthenticated visitor hits.
+ * Returns null for an unknown slug or a revoked link, and atomically bumps the
+ * view counter on every successful lookup. */
+export async function getShowcaseBySlug(slug: string): Promise<ShowcasePublicView | null> {
+  const row = await prisma.showcaseLink.findUnique({ where: { slug } });
+  if (!row || row.revokedAt) return null;
+
+  await prisma.showcaseLink.update({
+    where: { id: row.id },
+    data: { viewCount: { increment: 1 } },
+  });
+
+  return {
+    slug: row.slug,
+    artifact_type: row.artifactType as ShowcaseArtifactType,
+    title: row.title,
+    created_at: row.createdAt.toISOString(),
+    snapshot: row.snapshot as unknown as ShowcaseManualStdSnapshot,
+  };
 }
 
 // ─── Test runs (execution history) ───────────────────────────────────────────

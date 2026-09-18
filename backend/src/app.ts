@@ -28,6 +28,7 @@ import testRunsRouter from "./routes/testRuns.js";
 import issuesRouter from "./routes/issues.js";
 import authRouter from "./routes/auth.js";
 import errorsRouter from "./routes/errors.js";
+import showcaseRouter, { showcasePublicRouter } from "./routes/showcase.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { ensureDbUser } from "./middleware/ensureDbUser.js";
 import { autoLocalGuest } from "./middleware/autoLocalGuest.js";
@@ -134,6 +135,7 @@ app.use(guestSession);
 // ─── Auth routes (public) ─────────────────────────────────────────────────────
 app.use(authRouter);
 app.use(errorsRouter);
+app.use(showcasePublicRouter);
 
 // ─── Health check (public) ────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
@@ -178,6 +180,7 @@ protectedRouter.use(testsRouter);
 protectedRouter.use(logAnalysesRouter);
 protectedRouter.use(testRunsRouter);
 protectedRouter.use(issuesRouter);
+protectedRouter.use(showcaseRouter);
 app.use("/api", requireAuth, ensureDbUser, protectedRouter);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────────
