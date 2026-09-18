@@ -10,6 +10,7 @@ import {
   type DbTestRun,
 } from "../db.js";
 import type { DbUser } from "../db.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -20,7 +21,7 @@ router.get("/test-runs", async (req: Request, res: Response) => {
     const runs = await listTestRuns(userId, limit);
     res.json({ success: true, runs });
   } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list test runs" });
+    sendError(res, req, err, { safeMessage: "Failed to list test runs" });
   }
 });
 
@@ -30,7 +31,7 @@ router.get("/test-runs/stats", async (req: Request, res: Response) => {
     const stats = await getTestRunDashboardStats(userId);
     res.json({ success: true, ...stats });
   } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load dashboard stats" });
+    sendError(res, req, err, { safeMessage: "Failed to load dashboard stats" });
   }
 });
 
@@ -95,8 +96,7 @@ router.post("/test-runs", async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, run });
   } catch (err: unknown) {
-    console.error("[test-runs]", err);
-    res.status(500).json({ error: "Failed to create test run. Please try again." });
+    sendError(res, req, err, { safeMessage: "Failed to create test run. Please try again." });
   }
 });
 
@@ -132,8 +132,7 @@ router.patch("/test-runs/:id", async (req: Request, res: Response) => {
     if (!run) return res.status(404).json({ error: "Test run not found" });
     res.json({ success: true, run });
   } catch (err: unknown) {
-    console.error("[test-runs]", err);
-    res.status(500).json({ error: "Failed to update test run. Please try again." });
+    sendError(res, req, err, { safeMessage: "Failed to update test run. Please try again." });
   }
 });
 
