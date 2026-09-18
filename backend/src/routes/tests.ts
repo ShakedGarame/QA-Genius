@@ -10,6 +10,7 @@ import {
 import type { DbUser } from "../db.js";
 import { selfHealTest } from "../services/llm.js";
 import { resolveOpenAIKeySource } from "../lib/requestKeys.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -56,9 +57,8 @@ router.post("/tests/self-heal", async (req: Request, res: Response) => {
 
     return res.json({ success: true, healedCode, model, isMock, saved });
   } catch (err: unknown) {
-    return res
-      .status(500)
-      .json({ error: err instanceof Error ? err.message : "Self-heal failed" });
+    sendError(res, req, err, { safeMessage: "Self-heal failed" });
+    return;
   }
 });
 
@@ -68,7 +68,7 @@ router.get("/tests", async (req: Request, res: Response) => {
     const features = await listFeatureGroups(userId);
     return res.json({ success: true, features, tests: features.flatMap((g) => g.tests) });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list tests" });
+    sendError(res, req, err, { safeMessage: "Failed to list tests" });
   }
 });
 
@@ -85,7 +85,7 @@ router.get("/tests/:featureSlug/:fileName", async (req: Request, res: Response) 
     if (!code) return res.status(404).json({ error: "Test file not found" });
     return res.json({ success: true, featureSlug, fileName, code });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load test" });
+    sendError(res, req, err, { safeMessage: "Failed to load test" });
   }
 });
 
@@ -106,7 +106,7 @@ router.put("/tests/:featureSlug/:fileName", async (req: Request, res: Response) 
     if (!saved) return res.status(404).json({ error: "Test file not found" });
     return res.json({ success: true });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Update failed" });
+    sendError(res, req, err, { safeMessage: "Update failed" });
   }
 });
 
@@ -123,7 +123,7 @@ router.delete("/tests/:featureSlug/:fileName", async (req: Request, res: Respons
     if (!deleted) return res.status(404).json({ error: "File not found" });
     return res.json({ success: true, message: `Deleted ${featureSlug}/${fileName}` });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Delete failed" });
+    sendError(res, req, err, { safeMessage: "Delete failed" });
   }
 });
 
@@ -140,7 +140,7 @@ router.delete("/tests/:featureSlug", async (req: Request, res: Response) => {
     if (!deleted) return res.status(404).json({ error: "Feature not found" });
     return res.json({ success: true, message: `Deleted feature: ${featureSlug}` });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Delete failed" });
+    sendError(res, req, err, { safeMessage: "Delete failed" });
   }
 });
 
