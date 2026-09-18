@@ -27,6 +27,7 @@ import logAnalysesRouter from "./routes/logAnalyses.js";
 import testRunsRouter from "./routes/testRuns.js";
 import issuesRouter from "./routes/issues.js";
 import authRouter from "./routes/auth.js";
+import errorsRouter from "./routes/errors.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { ensureDbUser } from "./middleware/ensureDbUser.js";
 import { autoLocalGuest } from "./middleware/autoLocalGuest.js";
@@ -132,6 +133,7 @@ app.use(guestSession);
 
 // ─── Auth routes (public) ─────────────────────────────────────────────────────
 app.use(authRouter);
+app.use(errorsRouter);
 
 // ─── Health check (public) ────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
