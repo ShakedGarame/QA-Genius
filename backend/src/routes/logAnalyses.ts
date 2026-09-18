@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import type { DbUser } from "../db.js";
 import { deleteLogAnalysis, getLogAnalysisById, listLogAnalyses } from "../db.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -10,7 +11,7 @@ router.get("/log-analyses", async (req: Request, res: Response) => {
     const analyses = await listLogAnalyses(userId);
     return res.json({ success: true, analyses });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list analyses" });
+    sendError(res, req, err, { safeMessage: "Failed to list analyses" });
   }
 });
 
@@ -23,7 +24,7 @@ router.get("/log-analyses/:id", async (req: Request, res: Response) => {
     if (!analysis) return res.status(404).json({ error: "Analysis not found" });
     return res.json({ success: true, analysis });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load analysis" });
+    sendError(res, req, err, { safeMessage: "Failed to load analysis" });
   }
 });
 
@@ -36,7 +37,7 @@ router.delete("/log-analyses/:id", async (req: Request, res: Response) => {
     if (!deleted) return res.status(404).json({ error: "Analysis not found" });
     return res.json({ success: true, message: "Analysis deleted" });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete analysis" });
+    sendError(res, req, err, { safeMessage: "Failed to delete analysis" });
   }
 });
 
