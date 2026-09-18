@@ -32,6 +32,7 @@ import { ensureDbUser } from "./middleware/ensureDbUser.js";
 import { autoLocalGuest } from "./middleware/autoLocalGuest.js";
 import { guestSession } from "./middleware/guestSession.js";
 import { requestId } from "./middleware/requestId.js";
+import { normalizeError, logError } from "./lib/errors.js";
 
 const app = express();
 
@@ -183,8 +184,7 @@ app.use((_req, res) => {
 });
 
 // ─── Global error handler ─────────────────────────────────────────────────────
-app.use((err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error("[error]", err.message);
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   // Express requires this check: an error can surface here after a response
   // has already started (e.g. a deferred session-store save failing after
   // res.end() was already called). Calling res.json() again in that case
@@ -192,9 +192,12 @@ app.use((err: Error, _req: express.Request, res: express.Response, next: express
   // just logging a background failure. Delegating to the default handler is
   // the documented way to let Node close the connection safely.
   if (res.headersSent) {
+    logError(req, err);
     return next(err);
   }
-  res.status(500).json({ error: err.message ?? "Internal server error" });
+  const { status, safeMessage } = normalizeError(err);
+  logError(req, err);
+  res.status(status).json({ error: safeMessage, requestId: req.id });
 });
 
 export default app;
