@@ -12,9 +12,11 @@ import {
   Github,
   LogOut,
   ChevronDown,
+  Search,
 } from "lucide-react";
 import clsx from "clsx";
 import type { AuthUser } from "../../hooks/useAuth";
+import CommandPalette, { CommandItem } from "./CommandPalette";
 
 // Lazy-loaded so each tab's code (and, for Test Generator, Monaco) only
 // downloads once the user actually visits that tab, instead of all six
@@ -266,6 +268,7 @@ function MobileNavDrawer({
 export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>("generator");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // Once a tab has been visited it stays mounted (just hidden) so switching
   // back preserves its state/scroll position — but it's never mounted, and
   // its data fetches never fire, until the user actually opens it.
@@ -291,10 +294,50 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
     return () => window.removeEventListener("qa-genius:navigate-tab", onNavigate);
   }, []);
 
+  // ⌘K / Ctrl+K opens the command palette from anywhere in the app.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const selectTab = (id: TabId) => {
     setActiveTab(id);
     setMobileNavOpen(false);
   };
+
+  const paletteItems: CommandItem[] = [
+    ...NAV_ITEMS.map((item) => ({
+      id: `nav-${item.id}`,
+      label: item.label,
+      description: item.description,
+      icon: item.icon,
+      section: "Workspace",
+      run: () => selectTab(item.id),
+    })),
+    {
+      id: "source-github",
+      label: "Source on GitHub",
+      description: "Open the QA-Genius repository",
+      icon: Github,
+      keywords: ["repo", "code"],
+      section: "Links",
+      run: () => window.open("https://github.com/ShakedGarame/QA-Genius", "_blank", "noopener,noreferrer"),
+    },
+    {
+      id: "sign-out",
+      label: "Sign out",
+      description: user.email ?? user.name,
+      icon: LogOut,
+      section: "Account",
+      run: onLogout,
+    },
+  ];
 
   return (
     <div className="flex h-[100dvh] bg-surface-900 overflow-hidden">
@@ -375,6 +418,14 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
               </div>
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setPaletteOpen(true)}
+                aria-label="Search commands"
+                className="p-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-surface-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+              >
+                <Search className="w-4 h-4" />
+              </button>
               <UserDropdown user={user} onLogout={onLogout} mobile />
               <button
                 type="button"
@@ -403,7 +454,18 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
             <h2 className="text-lg font-semibold text-white">{activeItem.label}</h2>
             <p className="text-sm text-slate-500 mt-0.5">{activeItem.description}</p>
           </div>
-          <UserDropdown user={user} onLogout={onLogout} />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-surface-700/60 hover:bg-surface-700 border border-surface-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >
+              <Search className="w-3.5 h-3.5" aria-hidden />
+              <span>Search…</span>
+              <kbd className="text-[10px] font-mono bg-surface-800 border border-surface-600 rounded px-1.5 py-0.5">⌘K</kbd>
+            </button>
+            <UserDropdown user={user} onLogout={onLogout} />
+          </div>
         </header>
 
         <main
@@ -456,6 +518,8 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           )}
         </main>
       </div>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} />
     </div>
   );
 }
