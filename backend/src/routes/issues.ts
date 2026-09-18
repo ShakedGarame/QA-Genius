@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { getUserSettings } from "../db.js";
 import type { DbUser } from "../db.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -88,8 +89,7 @@ router.post("/issues/github/create", async (req: Request, res: Response) => {
       issueNumber: data.number,
     });
   } catch (err: unknown) {
-    console.error("[issues/github/create]", err);
-    return res.status(500).json({ error: "Failed to create GitHub issue. Please try again." });
+    sendError(res, req, err, { safeMessage: "Failed to create GitHub issue. Please try again." });
   }
 });
 
@@ -242,8 +242,7 @@ router.post("/issues/jira/create", async (req: Request, res: Response) => {
       issueKey,
     });
   } catch (err: unknown) {
-    console.error("[issues/jira/create]", err);
-    return res.status(500).json({ error: "Failed to create Jira ticket. Please try again." });
+    sendError(res, req, err, { safeMessage: "Failed to create Jira ticket. Please try again." });
   }
 });
 
