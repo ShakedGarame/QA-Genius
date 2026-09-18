@@ -31,6 +31,7 @@ import { requireAuth } from "./middleware/requireAuth.js";
 import { ensureDbUser } from "./middleware/ensureDbUser.js";
 import { autoLocalGuest } from "./middleware/autoLocalGuest.js";
 import { guestSession } from "./middleware/guestSession.js";
+import { requestId } from "./middleware/requestId.js";
 
 const app = express();
 
@@ -40,6 +41,8 @@ const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL
 if (isProduction) {
   app.set("trust proxy", 1);
 }
+
+app.use(requestId);
 
 // ─── Session store ────────────────────────────────────────────────────────────
 // Local dev: in-memory sessions (no Supabase dependency, survives db push).
