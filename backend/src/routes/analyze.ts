@@ -6,6 +6,7 @@ import { getUserSettings, saveLogAnalysis } from "../db.js";
 import type { DbUser } from "../db.js";
 import { extractOpenAIKeyFromRequest } from "../lib/requestKeys.js";
 import { fetchCoralogixLogs, resolveCoralogixConfig } from "../lib/coralogix.js";
+import { logError, normalizeError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -71,6 +72,7 @@ router.post("/analyze-failure", async (req: Request, res: Response) => {
           message: `📋 Retrieved ${logs.length} live log entries from Coralogix. Analyzing…`,
         });
       } catch (err) {
+        logError(req, err, "coralogix_fetch_fallback");
         const msg = err instanceof Error ? err.message : "Coralogix fetch failed";
         sendEvent("mcp_step", {
           step: 2,
@@ -129,8 +131,9 @@ router.post("/analyze-failure", async (req: Request, res: Response) => {
     sendEvent("result", result);
     sendEvent("done", { message: "Analysis complete", analysisId });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Analysis error";
-    sendEvent("error", { message });
+    const { safeMessage } = normalizeError(err);
+    logError(req, err);
+    sendEvent("error", { message: safeMessage, requestId: req.id });
   } finally {
     res.end();
   }
@@ -205,8 +208,9 @@ router.post("/analyze-logs", async (req: Request, res: Response) => {
     sendEvent("result", result);
     sendEvent("done", { message: "Analysis complete", analysisId });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Analysis error";
-    sendEvent("error", { message });
+    const { safeMessage } = normalizeError(err);
+    logError(req, err);
+    sendEvent("error", { message: safeMessage, requestId: req.id });
   } finally {
     res.end();
   }
