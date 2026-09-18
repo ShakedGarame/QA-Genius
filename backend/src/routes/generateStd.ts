@@ -7,6 +7,7 @@ import { GenerateManualStdRequest } from "../types/index.js";
 import { getUserSettings, saveManualStd, listManualStds, getManualStdById, deleteManualStd } from "../db.js";
 import type { DbUser } from "../db.js";
 import { resolveOpenAIKeySource } from "../lib/requestKeys.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -112,9 +113,8 @@ router.post(
         keySource,
       });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "STD generation failed";
-      console.error("[generate-std]", message);
-      return res.status(500).json({ error: message });
+      sendError(res, req, err, { safeMessage: "STD generation failed" });
+      return;
     }
   }
 );
@@ -125,7 +125,7 @@ router.get("/manual-std", async (req: Request, res: Response) => {
     const stds = await listManualStds(userId);
     return res.json({ success: true, stds });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list STDs" });
+    sendError(res, req, err, { safeMessage: "Failed to list STDs" });
   }
 });
 
@@ -137,7 +137,7 @@ router.get("/manual-std/:id", async (req: Request, res: Response) => {
     if (!std) return res.status(404).json({ error: "STD not found" });
     return res.json({ success: true, std });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load STD" });
+    sendError(res, req, err, { safeMessage: "Failed to load STD" });
   }
 });
 
@@ -149,7 +149,7 @@ router.delete("/manual-std/:id", async (req: Request, res: Response) => {
     if (!deleted) return res.status(404).json({ error: "STD not found" });
     return res.json({ success: true, message: "STD deleted" });
   } catch (err: unknown) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete STD" });
+    sendError(res, req, err, { safeMessage: "Failed to delete STD" });
   }
 });
 
