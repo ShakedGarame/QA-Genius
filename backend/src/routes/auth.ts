@@ -6,6 +6,7 @@ import type { DbUser } from "../db.js";
 import { ensureDbUser } from "../middleware/ensureDbUser.js";
 import { fetchCoralogixLogs, resolveCoralogixConfig } from "../lib/coralogix.js";
 import { GUEST_COOKIE_NAME, signGuestCookie } from "../lib/guestToken.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -85,8 +86,7 @@ router.post("/api/auth/mock-login", async (req: Request, res: Response) => {
       });
     });
   } catch (err) {
-    console.error("[mock-login]", err);
-    res.status(500).json({ error: "Login failed" });
+    sendError(res, req, err, { status: 500, safeMessage: "Login failed", errorType: "MockLoginError" });
   }
 });
 
@@ -123,15 +123,14 @@ router.post("/api/auth/admin-login", async (req: Request, res: Response) => {
   try {
     const adminUser = await getOrCreateAdminUser(adminEmail, process.env.ADMIN_NAME?.trim() || "Admin");
     req.login(adminUser, (err) => {
-      if (err) return res.status(500).json({ error: "Login failed" });
+      if (err) return sendError(res, req, err, { status: 500, safeMessage: "Login failed", errorType: "AdminLoginError" });
       res.json({
         success: true,
         user: { id: adminUser.id, name: adminUser.name, email: adminUser.email },
       });
     });
   } catch (err) {
-    console.error("[admin-login]", err);
-    res.status(500).json({ error: "Login failed" });
+    sendError(res, req, err, { status: 500, safeMessage: "Login failed", errorType: "AdminLoginError" });
   }
 });
 
@@ -214,7 +213,7 @@ router.get("/api/me", ensureDbUser, async (req: Request, res: Response) => {
         !!(process.env.JIRA_DOMAIN && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN),
     });
   } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load account" });
+    sendError(res, req, err, { safeMessage: "Failed to load account" });
   }
 });
 
@@ -248,8 +247,7 @@ router.get("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
       env_has_github_pat: !!process.env.GITHUB_ACTIONS_PAT,
     });
   } catch (err: unknown) {
-    console.error("[me/settings:get]", err);
-    res.status(500).json({ error: "Failed to load settings. Please try again." });
+    sendError(res, req, err, { safeMessage: "Failed to load settings. Please try again." });
   }
 });
 
@@ -295,8 +293,7 @@ router.put("/api/me/settings", ensureDbUser, async (req: Request, res: Response)
 
     res.json({ success: true });
   } catch (err: unknown) {
-    console.error("[me/settings:put]", err);
-    res.status(500).json({ error: "Failed to save settings. Please try again." });
+    sendError(res, req, err, { safeMessage: "Failed to save settings. Please try again." });
   }
 });
 
@@ -328,7 +325,7 @@ router.post("/api/me/settings/test-coralogix", ensureDbUser, async (req: Request
     await fetchCoralogixLogs(apiKey, region, "*", 5);
     res.json({ success: true });
   } catch (err: unknown) {
-    res.status(502).json({ error: err instanceof Error ? err.message : "Coralogix connection test failed" });
+    sendError(res, req, err, { status: 502, safeMessage: "Coralogix connection test failed" });
   }
 });
 
