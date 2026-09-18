@@ -20,11 +20,12 @@ model User {
   lastLogin  DateTime @default(now()) @map("last_login")
 
   settings    UserSettings?
-  features      Feature[]
-  logAnalyses   LogAnalysis[]
-  testRuns      TestRun[]
-  manualStds    ManualStd[]
-  showcaseLinks ShowcaseLink[]
+  features       Feature[]
+  logAnalyses    LogAnalysis[]
+  testRuns       TestRun[]
+  manualStds     ManualStd[]
+  showcaseLinks  ShowcaseLink[]
+  selfHealEvents SelfHealEvent[]
 
   @@map("users")
 }
@@ -164,6 +165,24 @@ model ShowcaseLink {
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("showcase_links")
+}
+
+/// One AI self-heal attempt (Test Repository "Self-Heal" action) — recorded so the
+/// Dashboard's "Avg Healing Speed" card can be a real, measured metric instead of
+/// a permanent N/A.
+model SelfHealEvent {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  featureSlug String?  @map("feature_slug")
+  fileName    String?  @map("file_name")
+  durationMs  Int      @map("duration_ms")
+  isMock      Boolean  @default(false) @map("is_mock")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("self_heal_events")
 }
 
 /// Owned by connect-pg-simple (the express-session store in app.ts), not by

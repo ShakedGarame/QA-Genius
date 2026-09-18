@@ -223,3 +223,20 @@ export interface ShowcasePublicView {
   created_at: string;
   snapshot: ShowcaseManualStdSnapshot;
 }
+
+export interface SelfHealStats {
+  /** null = no self-heal attempts recorded yet (show N/A instead of 0) */
+  averageDurationMs: number | null;
+  count: number;
+  mockCount: number;
+}
+
+export interface FlakyTestEntry {
+  key: string;
+  featureName: string;
+  testFileName: string | null;
+  passedCount: number;
+  failedCount: number;
+  lastStatus: "PASSED" | "FAILED";
+  lastRunAt: string;
+}

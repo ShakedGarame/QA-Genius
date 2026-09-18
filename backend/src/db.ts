@@ -17,6 +17,8 @@ import type {
   ShowcaseLinkRecord,
   ShowcaseManualStdSnapshot,
   ShowcasePublicView,
+  SelfHealStats,
+  FlakyTestEntry,
 } from "./types/index.js";
 
 export interface DbUser {
@@ -877,6 +879,40 @@ export async function getShowcaseBySlug(slug: string): Promise<ShowcasePublicVie
   };
 }
 
+// ─── Self-heal events (AI "fix this failing test" attempts) ──────────────────
+
+export async function recordSelfHealEvent(
+  userId: string,
+  data: { featureSlug?: string; fileName?: string; durationMs: number; isMock: boolean }
+): Promise<void> {
+  await prisma.selfHealEvent.create({
+    data: {
+      userId,
+      featureSlug: data.featureSlug ?? null,
+      fileName: data.fileName ?? null,
+      durationMs: data.durationMs,
+      isMock: data.isMock,
+    },
+  });
+}
+
+export async function getSelfHealStats(userId: string): Promise<SelfHealStats> {
+  const [agg, mockCount] = await Promise.all([
+    prisma.selfHealEvent.aggregate({
+      where: { userId },
+      _avg: { durationMs: true },
+      _count: true,
+    }),
+    prisma.selfHealEvent.count({ where: { userId, isMock: true } }),
+  ]);
+
+  return {
+    averageDurationMs: agg._avg.durationMs != null ? Math.round(agg._avg.durationMs) : null,
+    count: agg._count,
+    mockCount,
+  };
+}
+
 // ─── Test runs (execution history) ───────────────────────────────────────────
 
 export type TestRunStatus = "RUNNING" | "PASSED" | "FAILED";
@@ -1082,6 +1118,64 @@ export async function reconcileStaleRunningRuns(userId: string): Promise<number>
   return stale.length;
 }
 
+/** A test is "flaky" here if the same file has BOTH a passed and a failed result
+ * within its most recent runs — a real, unresolved signal distinct from a test
+ * that simply broke once and was fixed. Sampled over the last 300 completed runs
+ * (not all-time) so a long-fixed flake doesn't haunt the list forever. */
+async function getFlakyTests(userId: string): Promise<FlakyTestEntry[]> {
+  const sample = await prisma.testRun.findMany({
+    where: { userId, status: { in: ["PASSED", "FAILED"] } },
+    orderBy: { createdAt: "desc" },
+    take: 300,
+    select: {
+      testFileId: true,
+      featureName: true,
+      testFileName: true,
+      status: true,
+      createdAt: true,
+    },
+  });
+
+  const groups = new Map<
+    string,
+    { featureName: string; testFileName: string | null; passed: number; failed: number; lastStatus: "PASSED" | "FAILED"; lastRunAt: Date }
+  >();
+
+  for (const run of sample) {
+    if (!run.testFileName) continue; // no file identity to group by
+    const key = run.testFileId ?? `${run.featureName}::${run.testFileName}`;
+    const existing = groups.get(key);
+    if (existing) {
+      if (run.status === "PASSED") existing.passed += 1;
+      else existing.failed += 1;
+      // `sample` is already newest-first, so the first row seen per key is the latest.
+    } else {
+      groups.set(key, {
+        featureName: run.featureName,
+        testFileName: run.testFileName,
+        passed: run.status === "PASSED" ? 1 : 0,
+        failed: run.status === "FAILED" ? 1 : 0,
+        lastStatus: run.status as "PASSED" | "FAILED",
+        lastRunAt: run.createdAt,
+      });
+    }
+  }
+
+  return [...groups.entries()]
+    .filter(([, g]) => g.passed > 0 && g.failed > 0)
+    .map(([key, g]) => ({
+      key,
+      featureName: g.featureName,
+      testFileName: g.testFileName,
+      passedCount: g.passed,
+      failedCount: g.failed,
+      lastStatus: g.lastStatus,
+      lastRunAt: g.lastRunAt.toISOString(),
+    }))
+    .sort((a, b) => Math.min(b.passedCount, b.failedCount) - Math.min(a.passedCount, a.failedCount))
+    .slice(0, 5);
+}
+
 export async function getTestRunDashboardStats(userId: string): Promise<{
   totalRuns: number;
   completedRuns: number;
@@ -1091,6 +1185,8 @@ export async function getTestRunDashboardStats(userId: string): Promise<{
   passRatePercent: number | null;
   averageDurationMs: number | null;
   recentRuns: DbTestRun[];
+  selfHeal: SelfHealStats;
+  flakyTests: FlakyTestEntry[];
 }> {
   await reconcileStaleRunningRuns(userId);
 
@@ -1098,25 +1194,38 @@ export async function getTestRunDashboardStats(userId: string): Promise<{
 
   // ── Aggregate metrics across ALL completed runs in the DB ─────────────────
   // Using Prisma's aggregate so we never load every row into memory.
-  const [totalRuns, completedCount, runningCount, failedCount, passedCount, durationAgg] =
-    await Promise.all([
-      prisma.testRun.count({ where: { userId } }),
-      prisma.testRun.count({ where: { userId, status: { not: "RUNNING" } } }),
-      prisma.testRun.count({
-        where: {
-          userId,
-          status: "RUNNING",
-          createdAt: { gte: activeRunningCutoff },
-        },
-      }),
-      prisma.testRun.count({ where: { userId, status: "FAILED" } }),
-      prisma.testRun.count({ where: { userId, status: "PASSED" } }),
-      // Average only over completed runs that actually recorded a duration (> 0)
-      prisma.testRun.aggregate({
-        where: { userId, status: { not: "RUNNING" }, durationMs: { gt: 0 } },
-        _avg: { durationMs: true },
-      }),
-    ]);
+  const [
+    totalRuns,
+    completedCount,
+    runningCount,
+    failedCount,
+    passedCount,
+    durationAgg,
+    recentRuns,
+    selfHeal,
+    flakyTests,
+  ] = await Promise.all([
+    prisma.testRun.count({ where: { userId } }),
+    prisma.testRun.count({ where: { userId, status: { not: "RUNNING" } } }),
+    prisma.testRun.count({
+      where: {
+        userId,
+        status: "RUNNING",
+        createdAt: { gte: activeRunningCutoff },
+      },
+    }),
+    prisma.testRun.count({ where: { userId, status: "FAILED" } }),
+    prisma.testRun.count({ where: { userId, status: "PASSED" } }),
+    // Average only over completed runs that actually recorded a duration (> 0)
+    prisma.testRun.aggregate({
+      where: { userId, status: { not: "RUNNING" }, durationMs: { gt: 0 } },
+      _avg: { durationMs: true },
+    }),
+    // Recent 30 rows for the table display only (not used for metric maths)
+    listTestRuns(userId, 30),
+    getSelfHealStats(userId),
+    getFlakyTests(userId),
+  ]);
 
   const passRatePercent =
     completedCount > 0 ? Math.round((passedCount / completedCount) * 100) : null;
@@ -1125,9 +1234,6 @@ export async function getTestRunDashboardStats(userId: string): Promise<{
     durationAgg._avg.durationMs != null
       ? Math.round(durationAgg._avg.durationMs)
       : null;
-
-  // Recent 30 rows for the table display only (not used for metric maths)
-  const recentRuns = await listTestRuns(userId, 30);
 
   return {
     totalRuns,
@@ -1138,5 +1244,7 @@ export async function getTestRunDashboardStats(userId: string): Promise<{
     passRatePercent,
     averageDurationMs,
     recentRuns,
+    selfHeal,
+    flakyTests,
   };
 }

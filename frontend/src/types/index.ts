@@ -51,6 +51,23 @@ export interface TestRunRecord {
   updated_at: string;
 }
 
+export interface SelfHealStats {
+  /** null = no self-heal attempts recorded yet (show N/A instead of 0) */
+  averageDurationMs: number | null;
+  count: number;
+  mockCount: number;
+}
+
+export interface FlakyTestEntry {
+  key: string;
+  featureName: string;
+  testFileName: string | null;
+  passedCount: number;
+  failedCount: number;
+  lastStatus: TestRunStatus;
+  lastRunAt: string;
+}
+
 export interface DashboardStats {
   totalRuns: number;
   completedRuns: number;
@@ -62,6 +79,8 @@ export interface DashboardStats {
   /** null = no runs with recorded duration (show N/A) */
   averageDurationMs: number | null;
   recentRuns: TestRunRecord[];
+  selfHeal: SelfHealStats;
+  flakyTests: FlakyTestEntry[];
 }
 
 export interface RunArtifactInfo {

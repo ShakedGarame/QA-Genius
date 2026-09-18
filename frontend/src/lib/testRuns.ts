@@ -1,4 +1,4 @@
-import type { DashboardStats, TestRunRecord, TestRunStatus } from "../types";
+import type { DashboardStats, FlakyTestEntry, SelfHealStats, TestRunRecord, TestRunStatus } from "../types";
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   const res = await fetch("/api/test-runs/stats", { credentials: "include" });
@@ -13,6 +13,8 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     passRatePercent: json.passRatePercent != null ? Number(json.passRatePercent) : null,
     averageDurationMs: json.averageDurationMs != null ? Number(json.averageDurationMs) : null,
     recentRuns: (json.recentRuns ?? []) as TestRunRecord[],
+    selfHeal: (json.selfHeal ?? { averageDurationMs: null, count: 0, mockCount: 0 }) as SelfHealStats,
+    flakyTests: (json.flakyTests ?? []) as FlakyTestEntry[],
   };
 }
 

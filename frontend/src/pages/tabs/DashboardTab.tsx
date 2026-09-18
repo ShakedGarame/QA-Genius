@@ -11,17 +11,20 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronsUpDown,
+  Shuffle,
+  ShieldCheck,
 } from "lucide-react";
 import clsx from "clsx";
 import { cancelTestRun, fetchDashboardStats } from "../../lib/testRuns";
 import { useManualStds } from "../../hooks/useManualStds";
 import {
   formatDashboardDuration,
+  formatDuration,
   formatIsraeliDateTime,
   getRunStatusDisplay,
   isRunActivelyRunning,
 } from "../../lib/formatDuration";
-import type { DashboardStats, TestRunRecord } from "../../types";
+import type { DashboardStats, FlakyTestEntry, TestRunRecord } from "../../types";
 import {
   TabToolbar,
   TabContent,
@@ -182,6 +185,63 @@ function PassFailTrendChart({ runs }: { runs: TestRunRecord[] }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/** Thin two-segment ratio bar — passed vs. failed share of a flaky test's recent
+ * runs. Reuses the app's existing pass/fail status colors (emerald/red), the same
+ * pair PassFailTrendChart already uses, rather than introducing a new palette. */
+function PassFailRatioBar({ passed, failed }: { passed: number; failed: number }) {
+  const total = passed + failed;
+  const passedPct = total === 0 ? 0 : (passed / total) * 100;
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex-1 h-1.5 rounded-full bg-surface-700 overflow-hidden flex">
+        <div className="h-full bg-emerald-500" style={{ width: `${passedPct}%` }} />
+        <div className="h-full bg-red-500" style={{ width: `${100 - passedPct}%` }} />
+      </div>
+      <span className="text-[10px] font-mono text-slate-500 flex-shrink-0 tabular-nums">
+        {passed}/{total}
+      </span>
+    </div>
+  );
+}
+
+function FlakyTestsPanel({ tests }: { tests: FlakyTestEntry[] }) {
+  if (tests.length === 0) {
+    return (
+      <div className="flex items-center gap-2.5 text-sm text-slate-400 py-2">
+        <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+        No flaky tests detected in recent runs — every file's results are consistent.
+      </div>
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-surface-700/60">
+      {tests.map((t) => (
+        <li key={t.key} className="py-2.5 first:pt-0 last:pb-0">
+          <div className="flex items-center justify-between gap-3 mb-1.5">
+            <div className="min-w-0">
+              <p className="text-sm text-slate-200 font-medium truncate">{t.featureName}</p>
+              {t.testFileName && (
+                <p className="text-[11px] font-mono text-slate-500 truncate">{t.testFileName}</p>
+              )}
+            </div>
+            <span
+              className={clsx(
+                "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex-shrink-0",
+                t.lastStatus === "PASSED" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+              )}
+              title="Most recent run's result"
+            >
+              Last: {t.lastStatus}
+            </span>
+          </div>
+          <PassFailRatioBar passed={t.passedCount} failed={t.failedCount} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -359,11 +419,15 @@ export default function DashboardTab() {
               />
               <MetricCard
                 label="Avg Healing Speed"
-                value="N/A"
-                hint="Self-Heal duration isn't tracked yet — needs backend instrumentation"
+                value={formatDuration(stats.selfHeal.averageDurationMs)}
+                hint={
+                  stats.selfHeal.count > 0
+                    ? `Based on ${stats.selfHeal.count} Self-Heal attempt${stats.selfHeal.count !== 1 ? "s" : ""}`
+                    : "Use Self-Heal on a failed test in Test Repository to start tracking this"
+                }
                 icon={Zap}
-                accent="from-slate-600 to-slate-700"
-                isNa
+                accent={stats.selfHeal.count > 0 ? "from-amber-500 to-orange-600" : "from-slate-600 to-slate-700"}
+                isNa={stats.selfHeal.averageDurationMs == null}
               />
             </div>
 
@@ -387,6 +451,17 @@ export default function DashboardTab() {
               </div>
               <SurfaceCard>
                 <PassFailTrendChart runs={stats.recentRuns} />
+              </SurfaceCard>
+            </div>
+
+            <div className="mt-8">
+              <div className="flex items-center gap-2 mb-3">
+                <Shuffle className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-semibold text-slate-200">Flakiest Tests</h3>
+                <span className="text-xs font-normal text-slate-500">(same file, mixed results — last 300 runs)</span>
+              </div>
+              <SurfaceCard>
+                <FlakyTestsPanel tests={stats.flakyTests} />
               </SurfaceCard>
             </div>
 

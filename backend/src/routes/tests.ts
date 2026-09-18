@@ -6,6 +6,7 @@ import {
   getUserSettings,
   listFeatureGroups,
   updateGeneratedTestCode,
+  recordSelfHealEvent,
 } from "../db.js";
 import type { DbUser } from "../db.js";
 import { selfHealTest } from "../services/llm.js";
@@ -24,7 +25,8 @@ interface SelfHealBody {
 }
 
 router.post("/tests/self-heal", async (req: Request, res: Response) => {
-  const userId = (req.user as DbUser).id;
+  const user = req.user as DbUser;
+  const userId = user.id;
   const { testCode, errorOutput, rootCause, suggestedFix, featureSlug, fileName } =
     req.body as SelfHealBody;
 
@@ -41,6 +43,7 @@ router.post("/tests/self-heal", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid fileName" });
   }
 
+  const startedAt = Date.now();
   try {
     const userSettings = await getUserSettings(userId);
     const { key: openaiKey } = resolveOpenAIKeySource(req, userSettings);
@@ -53,6 +56,15 @@ router.post("/tests/self-heal", async (req: Request, res: Response) => {
     let saved = false;
     if (featureSlug && fileName) {
       saved = await updateGeneratedTestCode(userId, featureSlug, fileName, healedCode);
+    }
+
+    // Guests have no persisted `users` row (see guest-data-isolation design), so a
+    // FK write here would fail — the Dashboard's healing-speed metric is an
+    // owner-account feature anyway, same as everything else in History/Dashboard.
+    if (!user.is_guest) {
+      recordSelfHealEvent(userId, { featureSlug, fileName, durationMs: Date.now() - startedAt, isMock }).catch(
+        (err) => console.error("[self-heal] failed to record event:", err)
+      );
     }
 
     return res.json({ success: true, healedCode, model, isMock, saved });
