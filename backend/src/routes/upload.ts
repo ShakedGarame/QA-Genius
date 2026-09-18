@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
 import { parseFileBuffer, parseRawText } from "../services/parser.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -29,8 +30,8 @@ router.post("/upload-prd", upload.single("file"), async (req: Request, res: Resp
 
     return res.status(400).json({ error: "No file or text provided" });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Failed to parse file";
-    return res.status(422).json({ error: message });
+    sendError(res, req, err, { status: 422, safeMessage: "Failed to parse file" });
+    return;
   }
 });
 
