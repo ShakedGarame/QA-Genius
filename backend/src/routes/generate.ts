@@ -7,6 +7,7 @@ import { GenerateTestsRequest, FeatureMeta } from "../types/index.js";
 import { getUserSettings, saveGeneratedTest, upsertFeatureMeta } from "../db.js";
 import type { DbUser } from "../db.js";
 import { resolveOpenAIKeySource } from "../lib/requestKeys.js";
+import { sendError } from "../lib/errors.js";
 
 const router = Router();
 
@@ -145,9 +146,8 @@ router.post(
         keySource,
       });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Generation failed";
-      console.error("[generate-tests]", message);
-      return res.status(500).json({ error: message });
+      sendError(res, req, err, { safeMessage: "Generation failed" });
+      return;
     }
   }
 );
