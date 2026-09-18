@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getGeneratedTestCode } from "../db.js";
 import type { DbUser } from "../db.js";
 import { extractGitHubTokenFromRequest } from "../lib/githubToken.js";
+import { sendError, logError, normalizeError } from "../lib/errors.js";
 import {
   findDispatchRun,
   resolveCloudRunStatus,
@@ -137,8 +138,9 @@ async function runViaGitHubActions(
       baseUrl: body.baseUrl,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to trigger GitHub Actions";
-    sendSSE(res, "error", { message });
+    const { safeMessage } = normalizeError(err);
+    logError(req, err);
+    sendSSE(res, "error", { message: safeMessage, requestId: req.id });
     res.end();
     return;
   }
@@ -215,8 +217,8 @@ router.get("/run-test/find-dispatch", async (req: Request, res: Response) => {
       htmlUrl: run.htmlUrl,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to find dispatch run";
-    return res.status(500).json({ error: message });
+    sendError(res, req, err, { safeMessage: "Failed to find dispatch run" });
+    return;
   }
 });
 
@@ -239,9 +241,8 @@ router.get("/run-test/artifacts/:runId", async (req: Request, res: Response) => 
     );
     return res.json({ success: true, runId, ...gallery });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch artifacts";
-    console.error(`[artifacts] Run ${runId} failed:`, message);
-    return res.status(500).json({ error: message });
+    sendError(res, req, err, { safeMessage: "Failed to fetch artifacts" });
+    return;
   }
 });
 
@@ -265,8 +266,8 @@ router.get("/run-test/cloud-status/:runId", async (req: Request, res: Response) 
       passed: status.passed,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch cloud status";
-    return res.status(500).json({ error: message });
+    sendError(res, req, err, { safeMessage: "Failed to fetch cloud status" });
+    return;
   }
 });
 
@@ -294,8 +295,8 @@ router.get("/run-test/cloud-logs/:runId", async (req: Request, res: Response) =>
       durationMs: status.durationMs,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch cloud logs";
-    return res.status(500).json({ error: message });
+    sendError(res, req, err, { safeMessage: "Failed to fetch cloud logs" });
+    return;
   }
 });
 
@@ -448,8 +449,9 @@ router.post("/run-test", async (req: Request, res: Response) => {
       res.end();
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Execution error";
-    sendSSE(res, "error", { message });
+    const { safeMessage } = normalizeError(err);
+    logError(req, err);
+    sendSSE(res, "error", { message: safeMessage, requestId: req.id });
     res.end();
   }
 });
