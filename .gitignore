@@ -17,3 +17,4 @@ tests/generated/
 # Database & session store (user data — never commit)
 /data/
 .vercel
+.superpowers/
