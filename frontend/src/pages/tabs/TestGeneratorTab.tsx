@@ -19,7 +19,7 @@ import { routeFailureLogsToAnalyzer, getActionableFailureLogs, readPendingGenera
 import SelfHealModal from "../../components/qa-genius/SelfHealModal";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType, GenerateManualStdResult } from "../../types";
 import { MOCK_CODE_MAP } from "../../data/mockData";
-import { EmptyState } from "../../components/ui/layout";
+import { EmptyState, PrimaryButton } from "../../components/ui/layout";
 
 // Monaco is the single heaviest dependency in the app and is only needed once a
 // test has actually been generated — lazy-load it so it never ships in the
@@ -532,7 +532,7 @@ export default function TestGeneratorTab() {
     setFeatureNameError("");
 
     const userKey = readOpenAIKeyForRequest();
-    if (!userKey) {
+    if (!userKey && !user?.hasOpenAI) {
       setGenError("OpenAI API key missing. Open Settings, paste your sk-… key (it saves automatically), then try again.");
       return;
     }
@@ -618,7 +618,7 @@ export default function TestGeneratorTab() {
     setFeatureNameError("");
 
     const userKey = readOpenAIKeyForRequest();
-    if (!userKey) {
+    if (!userKey && !user?.hasOpenAI) {
       setStdError("OpenAI API key missing. Open Settings, paste your sk-… key (it saves automatically), then try again.");
       return;
     }
@@ -649,7 +649,7 @@ export default function TestGeneratorTab() {
         return;
       }
 
-      formData.append("openaiApiKey", userKey);
+      if (userKey) formData.append("openaiApiKey", userKey);
 
       const res = await fetch("/api/generate-std", {
         method: "POST",
@@ -902,28 +902,25 @@ export default function TestGeneratorTab() {
                 )}
                 <div className="flex gap-2 flex-1">
                   {generatorMode === "manual-std" ? (
-                    <button
+                    <PrimaryButton
                       onClick={handleGenerateStd}
-                      disabled={isGeneratingStd}
-                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500"
+                      loading={isGeneratingStd}
+                      icon={ClipboardList}
+                      accent="emerald"
+                      className="flex-1 sm:flex-none"
                     >
-                      {isGeneratingStd ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
                       {isGeneratingStd ? "Generating STD…" : "Generate Manual STD"}
-                    </button>
+                    </PrimaryButton>
                   ) : (
-                    <button
+                    <PrimaryButton
                       onClick={handleGenerate}
-                      disabled={isGenerating}
-                      className={clsx(
-                        "flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 text-white rounded-lg text-sm font-medium shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
-                        inputType === "swagger"
-                          ? "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500"
-                          : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500"
-                      )}
+                      loading={isGenerating}
+                      icon={Sparkles}
+                      accent={inputType === "swagger" ? "violet" : "sky"}
+                      className="flex-1 sm:flex-none"
                     >
-                      {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                       {isGenerating ? "Generating…" : inputType === "swagger" ? "Generate API Tests" : "Generate UI Tests"}
-                    </button>
+                    </PrimaryButton>
                   )}
                   <button
                     onClick={handleReset}
@@ -955,7 +952,7 @@ export default function TestGeneratorTab() {
                 icon={ClipboardList}
                 accent="emerald"
                 title="No STD generated yet"
-                description="Enter a feature name, provide a PRD or Swagger spec, and click Generate Manual STD to create a Standard Test Documentation table."
+                description="Enter a feature name, provide a PRD or Swagger spec, and click Generate Manual STD to create an STD table."
                 hint="Follow the steps above: Configure → Generate."
               />
             )}
@@ -966,7 +963,7 @@ export default function TestGeneratorTab() {
                   <ClipboardList className="w-6 h-6 animate-pulse text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-slate-200 font-medium">Generating Standard Test Documentation…</p>
+                  <p className="text-slate-200 font-medium">Generating Manual STD…</p>
                   <p className="text-sm text-slate-400 mt-1">
                     Detecting hidden requirements · Applying mandatory category coverage · Domain adaptation
                   </p>

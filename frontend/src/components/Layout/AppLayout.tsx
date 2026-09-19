@@ -107,6 +107,29 @@ function NavButton({
 
 function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLogout: () => void; mobile?: boolean }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // A `fixed inset-0` click-catcher would normally do this, but the desktop
+  // header uses `backdrop-blur`, which (like `transform`/`filter`) creates a
+  // new containing block for `position: fixed` descendants — so that overlay
+  // ends up clipped to the header's own box instead of covering the full
+  // viewport, and clicks on the sidebar never reach it. A document-level
+  // listener sidesteps that CSS containment entirely.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   const initials = user.name
     .split(" ")
@@ -128,7 +151,7 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
   );
 
   return (
-    <div className="relative flex-shrink-0">
+    <div ref={rootRef} className="relative flex-shrink-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -158,32 +181,29 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
       </button>
 
       {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
-          <div className="absolute right-0 top-full mt-1.5 z-40 w-52 bg-surface-700 border border-surface-500 rounded-xl shadow-2xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-surface-600">
-              <div className="flex items-center gap-2.5">
-                {avatar}
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{user.name}</p>
-                  {user.email && (
-                    <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
-                  )}
-                </div>
+        <div className="absolute right-0 top-full mt-1.5 z-40 w-52 bg-surface-700 border border-surface-500 rounded-xl shadow-2xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-surface-600">
+            <div className="flex items-center gap-2.5">
+              {avatar}
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+                {user.email && (
+                  <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+                )}
               </div>
             </div>
-            <div className="py-1">
-              <button
-                type="button"
-                onClick={() => { setOpen(false); onLogout(); }}
-                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
-              >
-                <LogOut className="w-4 h-4 flex-shrink-0" aria-hidden />
-                Sign out
-              </button>
-            </div>
           </div>
-        </>
+          <div className="py-1">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onLogout(); }}
+              className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <LogOut className="w-4 h-4 flex-shrink-0" aria-hidden />
+              Sign out
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
