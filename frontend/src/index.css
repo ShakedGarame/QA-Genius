@@ -104,4 +104,13 @@
   .glow-blue {
     box-shadow: 0 0 20px rgba(14, 165, 233, 0.15);
   }
+
+  /* Visually masks a plain text input like a password field, without using
+     type="password" — Chrome attaches its "manage passwords" suggestion UI
+     to any input[type=password] regardless of autocomplete/context, which
+     misfires on API-key/token fields that aren't real login credentials. */
+  .secret-mask {
+    -webkit-text-security: disc;
+    text-security: disc;
+  }
 }

@@ -111,14 +111,22 @@ function SecretInput({
       <div className="relative">
         <input
           id={id}
-          type={show && !isMasked ? "text" : "password"}
+          name={id}
+          type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder ?? "Enter key…"}
           autoComplete="off"
           spellCheck={false}
           disabled={disabled}
-          className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 pr-10 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-bwignore="true"
+          data-form-type="other"
+          className={clsx(
+            "w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 pr-10 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed",
+            !(show && !isMasked) && "secret-mask"
+          )}
         />
         {!disabled && !isMasked && value && (
           <button
