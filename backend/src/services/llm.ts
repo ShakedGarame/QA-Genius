@@ -16,8 +16,8 @@ import {
 // Server-level (env) keys — loaded once at startup
 const ENV_OPENAI_KEY = process.env.OPENAI_API_KEY;
 const ENV_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+export const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
 // ─── API Key Priority Chain ───────────────────────────────────────────────────
 // 1. User key  — provided by the user in the Settings panel (stored in SQLite)
@@ -28,13 +28,13 @@ const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 // key (or the server owner's master key) trigger real AI calls. Everyone else gets
 // the free interactive demo.
 
-interface ResolvedKeys {
+export interface ResolvedKeys {
   openaiKey: string | null;
   anthropicKey: string | null;
   isMock: boolean;
 }
 
-function resolveKeys(options: { openaiKey?: string; anthropicKey?: string } = {}): ResolvedKeys {
+export function resolveKeys(options: { openaiKey?: string; anthropicKey?: string } = {}): ResolvedKeys {
   const openaiKey = options.openaiKey?.trim() || ENV_OPENAI_KEY || null;
   const anthropicKey = options.anthropicKey?.trim() || ENV_ANTHROPIC_KEY || null;
   const isMock = !openaiKey && !anthropicKey;
