@@ -31,6 +31,13 @@ function tooComplexReply(): string {
   );
 }
 
+function noReplyFallback(): string {
+  return (
+    "מצטער, לא הצלחתי להפיק תשובה כרגע.\n" +
+    "Sorry, I couldn't produce a reply right now."
+  );
+}
+
 // ─── OpenAI (function-calling) ─────────────────────────────────────────────────
 
 async function runOpenAiAssistant(
@@ -69,14 +76,11 @@ async function runOpenAiAssistant(
 
     const message = response.choices[0]?.message;
     if (!message) {
-      return (
-        "מצטער, לא הצלחתי להפיק תשובה כרגע.\n" +
-        "Sorry, I couldn't produce a reply right now."
-      );
+      return noReplyFallback();
     }
 
     if (!message.tool_calls || message.tool_calls.length === 0) {
-      return message.content ?? "";
+      return message.content ?? noReplyFallback();
     }
 
     messages.push(message);
@@ -139,7 +143,7 @@ async function runAnthropicAssistant(
       const textBlock = response.content.find(
         (b): b is Anthropic.TextBlock => b.type === "text"
       );
-      return textBlock?.text ?? "";
+      return textBlock?.text ?? noReplyFallback();
     }
 
     messages.push({ role: "assistant", content: response.content });
