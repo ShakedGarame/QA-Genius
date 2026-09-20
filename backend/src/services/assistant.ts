@@ -1,10 +1,8 @@
 import type OpenAI from "openai";
 import type Anthropic from "@anthropic-ai/sdk";
-import { resolveKeys } from "./llm.js";
+import { resolveKeys, OPENAI_MODEL, ANTHROPIC_MODEL } from "./llm.js";
 import { ASSISTANT_TOOLS, executeAssistantTool } from "./assistantTools.js";
 
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 const MAX_TOOL_ROUNDS = 5;
 
 export interface ChatMessage {
@@ -27,7 +25,10 @@ Answer in the same language the user wrote in (Hebrew or English). Keep answers
 short and concrete — a sentence or two, or a short list, not an essay.`;
 
 function tooComplexReply(): string {
-  return "השאלה הזו דרשה יותר מדי שלבים כדי לענות עליה — נסה לפרק אותה לכמה שאלות קטנות יותר.";
+  return (
+    "השאלה הזו דרשה יותר מדי שלבים כדי לענות עליה — נסה לפרק אותה לכמה שאלות קטנות יותר.\n" +
+    "This question required too many steps to answer — try breaking it into smaller questions."
+  );
 }
 
 // ─── OpenAI (function-calling) ─────────────────────────────────────────────────
@@ -67,7 +68,12 @@ async function runOpenAiAssistant(
     });
 
     const message = response.choices[0]?.message;
-    if (!message) return "מצטער, לא הצלחתי להפיק תשובה כרגע.";
+    if (!message) {
+      return (
+        "מצטער, לא הצלחתי להפיק תשובה כרגע.\n" +
+        "Sorry, I couldn't produce a reply right now."
+      );
+    }
 
     if (!message.tool_calls || message.tool_calls.length === 0) {
       return message.content ?? "";

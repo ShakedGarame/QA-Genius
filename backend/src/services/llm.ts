@@ -16,8 +16,8 @@ import {
 // Server-level (env) keys — loaded once at startup
 const ENV_OPENAI_KEY = process.env.OPENAI_API_KEY;
 const ENV_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+export const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
 // ─── API Key Priority Chain ───────────────────────────────────────────────────
 // 1. User key  — provided by the user in the Settings panel (stored in SQLite)
