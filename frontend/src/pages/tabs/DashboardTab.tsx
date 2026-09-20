@@ -413,7 +413,7 @@ export default function DashboardTab() {
               <MetricCard
                 label="Generated STDs"
                 value={String(stds.length)}
-                hint="Manual Standard Test Documentation tables saved"
+                hint="Manual STD tables saved"
                 icon={ClipboardList}
                 accent={stds.length > 0 ? "from-teal-500 to-emerald-600" : "from-slate-600 to-slate-700"}
               />

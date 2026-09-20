@@ -137,7 +137,7 @@ export default function ShowcasePage() {
             <div>
               <h1 className="text-xl sm:text-2xl font-bold text-white">{view.title}</h1>
               <p className="text-xs text-slate-500 mt-1">
-                AI-generated Standard Test Documentation, published as a public example.
+                AI-generated test documentation, published as a public example.
               </p>
             </div>
             <div className="flex-1 min-h-0 flex flex-col">

@@ -105,7 +105,7 @@ export default function ManualStdTable({ testCases, coverage, featureName, domai
     <div className="flex flex-col gap-3 min-h-0 flex-1">
       <div className="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <span className="text-xs text-slate-400">Standard Test Documentation</span>
+          <span className="text-xs text-slate-400">Manual STD</span>
           <Pill className={isMock ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"}>
             {isMock ? "MOCK" : model}
           </Pill>

@@ -16,6 +16,7 @@ import clsx from "clsx";
 import { FailureAnalysis, McpLog, McpStep } from "../../types";
 import McpConfigModal, { McpSettingsButton } from "./McpConfigModal";
 import FullscreenModal, { CopyButton } from "../ui/FullscreenModal";
+import { PrimaryButton } from "../ui/layout";
 
 interface Props {
   errorDetails: string;
@@ -91,15 +92,10 @@ export default function FailureAnalyzer({
           </div>
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 flex-shrink-0">
             {onSelfHeal && (
-              <button
-                type="button"
-                onClick={onSelfHeal}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-sm font-medium shadow-lg transition-all"
-              >
-                <Sparkles className="w-4 h-4" />
+              <PrimaryButton onClick={onSelfHeal} accent="sky" size="sm" icon={Sparkles}>
                 <span className="sm:hidden">Self-Heal</span>
                 <span className="hidden sm:inline">Self-Heal Test Code</span>
-              </button>
+              </PrimaryButton>
             )}
             <button
               type="button"

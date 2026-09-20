@@ -12,7 +12,7 @@ import { FeatureGroup, TestFileInfo, ManualStdRecord } from "../../types";
 import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
 import { routeRunToGenerator } from "../../lib/cloudRunner";
 import { exportStdToPdf } from "../../lib/exportStd";
-import ManualStdTable from "../../components/qa-genius/ManualStdTable";
+import ManualStdViewerModal from "../../components/qa-genius/ManualStdViewerModal";
 import ShowcaseModal from "../../components/qa-genius/ShowcaseModal";
 import {
   TabToolbar,
@@ -93,36 +93,6 @@ function CodeModal({ file, isMock, onClose }: { file: TestFileInfo; isMock: bool
           {code === null
             ? <div className="flex items-center justify-center h-full text-slate-500"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
             : <pre className="text-xs font-mono text-slate-300 leading-5 whitespace-pre-wrap">{code}</pre>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Manual STD viewer modal ──────────────────────────────────────────────────
-
-function ManualStdViewerModal({ std, onClose }: { std: ManualStdRecord; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-      <div className="w-full max-w-6xl h-[85vh] bg-surface-800 border border-surface-600 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-600 bg-surface-700 flex-shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <ClipboardList className="w-4 h-4 text-teal-400 flex-shrink-0" aria-hidden />
-            <span className="text-sm font-mono text-slate-200 truncate">{std.feature_name}</span>
-          </div>
-          <button onClick={onClose} className="px-3 py-1 text-xs text-slate-400 hover:text-white bg-surface-600 hover:bg-surface-500 rounded transition-colors flex-shrink-0">
-            Close
-          </button>
-        </div>
-        <div className="flex-1 min-h-0 overflow-hidden p-5 flex flex-col">
-          <ManualStdTable
-            testCases={std.test_cases}
-            coverage={std.coverage}
-            featureName={std.feature_name}
-            domain={std.domain}
-            model={std.model}
-            isMock={std.is_mock}
-          />
         </div>
       </div>
     </div>
@@ -230,7 +200,7 @@ function FeatureCard({ group, onViewFile, onRunFile, onDeleteFile, onDeleteFeatu
                   {!isMock && (
                     <button
                       onClick={() => onShareFile(file)}
-                      title="Share public link"
+                      title="Share Showcase Link"
                       className="p-1.5 rounded hover:bg-surface-600 text-slate-500 hover:text-sky-400 transition-colors"
                     >
                       <Share2 className="w-3.5 h-3.5" />

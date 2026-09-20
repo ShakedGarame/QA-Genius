@@ -167,6 +167,55 @@ export const FormTextarea = React.forwardRef<
 ));
 FormTextarea.displayName = "FormTextarea";
 
+/** The app's one primary call-to-action button — same shape/gradient family
+ * everywhere (Generate STD, Generate Tests, etc.) instead of each screen
+ * hand-rolling its own gradient classes. `accent` picks which of the app's
+ * three CTA gradients to use; it's a visual grouping, not a new color. */
+export function PrimaryButton({
+  children,
+  accent = "sky",
+  size = "md",
+  loading = false,
+  icon: Icon,
+  className,
+  disabled,
+  ...props
+}: {
+  children: ReactNode;
+  accent?: "sky" | "emerald" | "violet";
+  size?: "sm" | "md";
+  loading?: boolean;
+  icon?: LucideIcon;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const accentMap = {
+    sky: "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500",
+    emerald: "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500",
+    violet: "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500",
+  };
+  const sizeMap = {
+    sm: "px-4 py-2",
+    md: "px-6 py-2.5",
+  };
+  return (
+    <button
+      type="button"
+      disabled={disabled || loading}
+      className={clsx(
+        "flex items-center justify-center gap-2 text-white rounded-lg text-sm font-medium shadow-lg transition-all",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
+        sizeMap[size],
+        accentMap[accent],
+        className
+      )}
+      {...props}
+    >
+      {loading ? <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" aria-hidden /> : Icon ? <Icon className="w-4 h-4 flex-shrink-0" aria-hidden /> : null}
+      {children}
+    </button>
+  );
+}
+
 export function SecondaryButton({
   children,
   className,

@@ -29,6 +29,7 @@ import {
   FormInput,
   FormTextarea,
   ErrorBanner,
+  PrimaryButton,
 } from "../../components/ui/layout";
 import SelfHealModal from "../../components/qa-genius/SelfHealModal";
 
@@ -458,18 +459,16 @@ export default function LogAnalyzerTab() {
 
           {/* Action buttons */}
           <div className="flex gap-2">
-            <button
+            <PrimaryButton
               onClick={() => void handleAnalyze()}
               disabled={!rawLogs.trim() || isAnalyzing}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium shadow-lg transition-all"
+              loading={isAnalyzing}
+              icon={BrainCircuit}
+              accent="violet"
+              className="flex-1 sm:flex-none"
             >
-              {isAnalyzing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <BrainCircuit className="w-4 h-4" />
-              )}
               {isAnalyzing ? (statusMessage || "Analyzing…") : "Analyze Logs"}
-            </button>
+            </PrimaryButton>
             {(rawLogs || result) && (
               <button
                 onClick={handleClear}

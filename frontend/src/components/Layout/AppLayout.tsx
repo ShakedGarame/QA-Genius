@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   BrainCircuit,
   Sparkles,
@@ -56,6 +57,21 @@ const NAV_ITEMS: {
 
 const MAIN_NAV = NAV_ITEMS.filter((i) => !i.bottom);
 const BOTTOM_NAV = NAV_ITEMS.filter((i) => i.bottom);
+
+// Each tab gets a real, shareable, refresh-safe URL instead of living only in
+// component state — so a direct link to /dashboard (or hitting refresh while
+// on it) lands back on the same tab instead of always resetting to Generator.
+const TAB_PATHS: Record<TabId, string> = {
+  generator: "/generator",
+  repository: "/repository",
+  analyzer: "/analyzer",
+  history: "/history",
+  dashboard: "/dashboard",
+  settings: "/settings",
+};
+const PATH_TO_TAB: Partial<Record<string, TabId>> = Object.fromEntries(
+  (Object.entries(TAB_PATHS) as [TabId, string][]).map(([id, path]) => [path, id])
+);
 
 // ─── NavButton ────────────────────────────────────────────────────────────────
 
@@ -286,7 +302,9 @@ function MobileNavDrawer({
 // ─── AppLayout ────────────────────────────────────────────────────────────────
 
 export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
-  const [activeTab, setActiveTab] = useState<TabId>("generator");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeTab: TabId = PATH_TO_TAB[location.pathname] ?? "generator";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Once a tab has been visited it stays mounted (just hidden) so switching
@@ -305,14 +323,23 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
     mainScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [activeTab]);
 
+  // Land on Generator for "/" or any unrecognized path — `replace` so this
+  // never adds an extra back-button step.
+  useEffect(() => {
+    if (!PATH_TO_TAB[location.pathname]) {
+      navigate(TAB_PATHS.generator, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-check when the path itself changes
+  }, [location.pathname]);
+
   useEffect(() => {
     const onNavigate = (event: Event) => {
       const tab = (event as CustomEvent<{ tab: TabId }>).detail?.tab;
-      if (tab) setActiveTab(tab);
+      if (tab) navigate(TAB_PATHS[tab]);
     };
     window.addEventListener("qa-genius:navigate-tab", onNavigate);
     return () => window.removeEventListener("qa-genius:navigate-tab", onNavigate);
-  }, []);
+  }, [navigate]);
 
   // ⌘K / Ctrl+K opens the command palette from anywhere in the app.
   useEffect(() => {
@@ -327,7 +354,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
   }, []);
 
   const selectTab = (id: TabId) => {
-    setActiveTab(id);
+    navigate(TAB_PATHS[id]);
     setMobileNavOpen(false);
   };
 

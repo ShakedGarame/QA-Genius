@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Share2, X, Loader2, Ban, ExternalLink } from "lucide-react";
+import { Share2, Loader2, Ban, ExternalLink } from "lucide-react";
 import { ShowcaseLinkRecord } from "../../types";
 import { CopyButton } from "../ui/FullscreenModal";
+import Modal from "../ui/Modal";
 
 export type ShowcasePublishRequest =
   | { artifactType: "manual_std"; sourceId: string }
@@ -92,77 +93,58 @@ export default function ShowcaseModal({ title, publish, onClose }: ShowcaseModal
   const publicUrl = link ? `${window.location.origin}/showcase/${link.slug}` : "";
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-      <div className="w-full max-w-lg bg-surface-800 border border-surface-600 rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-600">
-          <div className="flex items-center gap-2">
-            <Share2 className="w-4 h-4 text-sky-400" />
-            <h3 className="text-sm font-semibold text-white">Share Showcase Link</h3>
+    <Modal open onClose={onClose} title="Share Showcase Link" icon={Share2}>
+      <p className="text-xs text-slate-400 leading-relaxed">
+        Anyone with this link can view a read-only page of <span className="text-slate-200">{title}</span>{" "}
+        — no login required. They won't see any other data in your account.
+      </p>
+
+      {isPublishing && (
+        <div className="flex items-center gap-2 text-sm text-slate-400 py-4 justify-center">
+          <Loader2 className="w-4 h-4 animate-spin" /> Publishing…
+        </div>
+      )}
+
+      {error && (
+        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      {link && !isPublishing && (
+        <>
+          <div className="flex items-center gap-2 bg-surface-900 border border-surface-600 rounded-lg px-3 py-2.5">
+            <a
+              href={publicUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 min-w-0 truncate text-sm font-mono text-sky-400 hover:text-sky-300"
+            >
+              {publicUrl}
+            </a>
+            <a
+              href={publicUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in new tab"
+              className="p-1 rounded text-slate-400 hover:text-slate-200 flex-shrink-0"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+            <CopyButton text={publicUrl} />
           </div>
+
           <button
             type="button"
-            onClick={onClose}
-            className="p-1 rounded hover:bg-surface-700 text-slate-400 hover:text-white"
-            aria-label="Close"
+            onClick={handleRevoke}
+            disabled={isRevoking}
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-red-400 transition-colors disabled:opacity-50"
           >
-            <X className="w-4 h-4" />
+            {isRevoking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
+            Revoke this link
           </button>
-        </div>
-
-        <div className="px-5 py-5 space-y-4">
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Anyone with this link can view a read-only page of <span className="text-slate-200">{title}</span>{" "}
-            — no login required. They won't see any other data in your account.
-          </p>
-
-          {isPublishing && (
-            <div className="flex items-center gap-2 text-sm text-slate-400 py-4 justify-center">
-              <Loader2 className="w-4 h-4 animate-spin" /> Publishing…
-            </div>
-          )}
-
-          {error && (
-            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-              {error}
-            </div>
-          )}
-
-          {link && !isPublishing && (
-            <>
-              <div className="flex items-center gap-2 bg-surface-900 border border-surface-600 rounded-lg px-3 py-2.5">
-                <a
-                  href={publicUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 min-w-0 truncate text-sm font-mono text-sky-400 hover:text-sky-300"
-                >
-                  {publicUrl}
-                </a>
-                <a
-                  href={publicUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open in new tab"
-                  className="p-1 rounded text-slate-400 hover:text-slate-200 flex-shrink-0"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-                <CopyButton text={publicUrl} />
-              </div>
-
-              <button
-                type="button"
-                onClick={handleRevoke}
-                disabled={isRevoking}
-                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-red-400 transition-colors disabled:opacity-50"
-              >
-                {isRevoking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
-                Revoke this link
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+        </>
+      )}
+    </Modal>
   );
 }
