@@ -18,3 +18,5 @@ tests/generated/
 /data/
 .vercel
 .superpowers/
+
+.worktrees/
