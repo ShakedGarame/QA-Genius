@@ -26,6 +26,7 @@ import testsRouter from "./routes/tests.js";
 import logAnalysesRouter from "./routes/logAnalyses.js";
 import testRunsRouter from "./routes/testRuns.js";
 import issuesRouter from "./routes/issues.js";
+import assistantRouter from "./routes/assistant.js";
 import authRouter from "./routes/auth.js";
 import errorsRouter from "./routes/errors.js";
 import showcaseRouter, { showcasePublicRouter } from "./routes/showcase.js";
@@ -180,6 +181,7 @@ protectedRouter.use(testsRouter);
 protectedRouter.use(logAnalysesRouter);
 protectedRouter.use(testRunsRouter);
 protectedRouter.use(issuesRouter);
+protectedRouter.use(assistantRouter);
 protectedRouter.use(showcaseRouter);
 app.use("/api", requireAuth, ensureDbUser, protectedRouter);
 
