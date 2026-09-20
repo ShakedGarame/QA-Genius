@@ -92,8 +92,17 @@ export default function ShowcaseModal({ title, publish, onClose }: ShowcaseModal
 
   const publicUrl = link ? `${window.location.origin}/showcase/${link.slug}` : "";
 
+  // The publish POST above isn't idempotent — closing (Escape, backdrop
+  // click, or the header's X, all of which route through Modal's onClose)
+  // while it's still in flight would unmount this component, and reopening
+  // the dialog fires a second POST, publishing an orphaned duplicate link.
+  const handleClose = () => {
+    if (isPublishing) return;
+    onClose();
+  };
+
   return (
-    <Modal open onClose={onClose} title="Share Showcase Link" icon={Share2}>
+    <Modal open onClose={handleClose} title="Share Showcase Link" icon={Share2}>
       <p className="text-xs text-slate-400 leading-relaxed">
         Anyone with this link can view a read-only page of <span className="text-slate-200">{title}</span>{" "}
         — no login required. They won't see any other data in your account.

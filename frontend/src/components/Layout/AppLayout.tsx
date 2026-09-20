@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   BrainCircuit,
@@ -124,6 +125,37 @@ function NavButton({
 function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLogout: () => void; mobile?: boolean }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+
+  // The menu is portaled to <body> (like Modal/FullscreenModal) instead of
+  // living inside this header. Every per-tab toolbar also uses
+  // `backdrop-blur`, which — like `transform`/`filter` — makes that toolbar
+  // establish its own stacking context; since it sits later in the DOM than
+  // this header, it was painting *over* an un-portaled dropdown regardless
+  // of the dropdown's own z-index (only visible past the toolbar's bottom
+  // edge, e.g. "Sign out" showing while the row above it didn't). Portaling
+  // removes it from that comparison entirely. Position is computed from the
+  // trigger button since a portaled element can no longer rely on
+  // `absolute` positioning against its old parent.
+  useEffect(() => {
+    if (!open) return;
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (rect) setMenuPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+  }, [open]);
+
+  // Desktop and mobile each mount their own always-present UserDropdown,
+  // toggled by CSS breakpoint rather than conditional rendering — so
+  // resizing across `lg` while this one is open hides its trigger without
+  // unmounting it, leaving the portaled menu anchored to a stale position
+  // with no visible trigger nearby. Simplest correct fix: a resize just
+  // closes it, same as any other "environment changed" case.
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => setOpen(false);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open]);
 
   // A `fixed inset-0` click-catcher would normally do this, but the desktop
   // header uses `backdrop-blur`, which (like `transform`/`filter`) creates a
@@ -134,7 +166,9 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -196,8 +230,12 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
         )}
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-40 w-52 bg-surface-700 border border-surface-500 rounded-xl shadow-2xl overflow-hidden">
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+          className="z-[9999] w-52 bg-surface-700 border border-surface-500 rounded-xl shadow-2xl overflow-hidden animate-fade-in"
+        >
           <div className="px-4 py-3 border-b border-surface-600">
             <div className="flex items-center gap-2.5">
               {avatar}
@@ -219,7 +257,8 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
               Sign out
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -354,7 +393,9 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
   }, []);
 
   const selectTab = (id: TabId) => {
-    navigate(TAB_PATHS[id]);
+    // Re-clicking the already-active tab shouldn't push a second, identical
+    // history entry — that turns one Back press into a no-op.
+    if (id !== activeTab) navigate(TAB_PATHS[id]);
     setMobileNavOpen(false);
   };
 
