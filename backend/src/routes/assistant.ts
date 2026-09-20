@@ -8,11 +8,17 @@ import { sendError } from "../lib/errors.js";
 const router = Router();
 
 const MAX_HISTORY_MESSAGES = 20;
+const MAX_MESSAGE_LENGTH = 6000;
 
 function isChatMessage(value: unknown): value is ChatMessage {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
-  return (v.role === "user" || v.role === "assistant") && typeof v.content === "string";
+  return (
+    (v.role === "user" || v.role === "assistant") &&
+    typeof v.content === "string" &&
+    v.content.trim().length > 0 &&
+    v.content.length <= MAX_MESSAGE_LENGTH
+  );
 }
 
 router.post("/assistant/chat", async (req: Request, res: Response) => {
