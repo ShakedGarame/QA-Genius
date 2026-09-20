@@ -28,13 +28,13 @@ const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 // key (or the server owner's master key) trigger real AI calls. Everyone else gets
 // the free interactive demo.
 
-interface ResolvedKeys {
+export interface ResolvedKeys {
   openaiKey: string | null;
   anthropicKey: string | null;
   isMock: boolean;
 }
 
-function resolveKeys(options: { openaiKey?: string; anthropicKey?: string } = {}): ResolvedKeys {
+export function resolveKeys(options: { openaiKey?: string; anthropicKey?: string } = {}): ResolvedKeys {
   const openaiKey = options.openaiKey?.trim() || ENV_OPENAI_KEY || null;
   const anthropicKey = options.anthropicKey?.trim() || ENV_ANTHROPIC_KEY || null;
   const isMock = !openaiKey && !anthropicKey;
