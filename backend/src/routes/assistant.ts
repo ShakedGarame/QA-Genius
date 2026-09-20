@@ -29,6 +29,13 @@ router.post("/assistant/chat", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "messages must be a non-empty array" });
   }
 
+  // Anthropic's Messages API requires the conversation to start with role
+  // "user" and to strictly alternate — slicing to the last N messages, or a
+  // caller sending a gappy/malformed history, can otherwise leave a leading
+  // non-user message or two consecutive same-role turns. That constraint is
+  // Anthropic-specific, not a general request-shape rule, so it's handled in
+  // `runAnthropicAssistant` (assistant.ts) rather than here; this validation
+  // only enforces the provider-agnostic shape (well-formed, bounded messages).
   const messages = rawMessages.filter(isChatMessage).slice(-MAX_HISTORY_MESSAGES);
   if (messages.length === 0) {
     return res.status(400).json({ error: "No valid messages provided" });

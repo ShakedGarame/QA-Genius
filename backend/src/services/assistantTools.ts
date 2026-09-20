@@ -56,7 +56,8 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       },
     },
     execute: async (userId, args) => {
-      const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+      const rawLimit = Number(args.limit);
+      const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 10, 1), 30);
       const runs = await listTestRuns(userId, limit);
       return runs.map((r) => ({
         feature: r.feature_name,
@@ -149,7 +150,11 @@ export function findAssistantTool(name: string): AssistantTool | undefined {
 }
 
 /** Runs a tool by name and never throws — a failed tool becomes a `{ error }`
- * object the model can see and work around, instead of aborting the whole chat. */
+ * object the model can see and work around, instead of aborting the whole chat.
+ * The error message is deliberately generic (not `err.message`) — same
+ * internal-detail-hiding convention as `sendError`/`normalizeError` in
+ * `lib/errors.ts`, since this `{ error }` can end up quoted back to the user
+ * by the model. */
 export async function executeAssistantTool(
   userId: string,
   name: string,
@@ -160,6 +165,7 @@ export async function executeAssistantTool(
   try {
     return await tool.execute(userId, args);
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Tool execution failed" };
+    console.error(`[assistant] tool "${name}" failed for user ${userId}:`, err);
+    return { error: "This data is temporarily unavailable, please try again." };
   }
 }
