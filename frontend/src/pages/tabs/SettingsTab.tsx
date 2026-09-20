@@ -335,9 +335,9 @@ export default function SettingsTab() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 min-h-0">
+      <TabContent>
         <LoadingState message="Loading settings…" />
-      </div>
+      </TabContent>
     );
   }
 
