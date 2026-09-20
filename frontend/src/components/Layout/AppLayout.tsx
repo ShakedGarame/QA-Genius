@@ -18,6 +18,7 @@ import {
 import clsx from "clsx";
 import type { AuthUser } from "../../hooks/useAuth";
 import CommandPalette, { CommandItem } from "./CommandPalette";
+import AssistantWidget from "./AssistantWidget";
 
 // Lazy-loaded so each tab's code (and, for Test Generator, Monaco) only
 // downloads once the user actually visits that tab, instead of all six
@@ -567,6 +568,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} />
+      <AssistantWidget />
     </div>
   );
 }
