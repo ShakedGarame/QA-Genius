@@ -27,14 +27,18 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
   {
     name: "get_dashboard_stats",
     description:
-      "Get aggregate test-run stats for this user: total/passed/failed/running run counts, " +
-      "pass rate percent, and average run duration. Use for questions like 'how many tests ran' " +
-      "or 'what's my pass rate'.",
+      "Get aggregate stats for this user. Returns TWO different kinds of numbers that must " +
+      "not be confused: `totalRuns` etc. count individual test EXECUTIONS (the same automated " +
+      "test rerun 5 times counts as 5), while `distinctAutomatedTestCount` is how many distinct " +
+      "automated test files the user has (that same test counts as 1). Use totalRuns/passRatePercent " +
+      "for questions like 'how many times have tests run' or 'what's my pass rate'; use " +
+      "distinctAutomatedTestCount for 'how many automated tests do I have'.",
     parameters: NO_PARAMS,
     execute: async (userId) => {
       const stats = await getTestRunDashboardStats(userId);
       return {
         totalRuns: stats.totalRuns,
+        distinctAutomatedTestCount: stats.distinctAutomatedTestCount,
         completedRuns: stats.completedRuns,
         runningRuns: stats.runningRuns,
         passedRuns: stats.passedRuns,

@@ -1233,6 +1233,7 @@ async function getFlakyTests(userId: string): Promise<FlakyTestEntry[]> {
 
 export async function getTestRunDashboardStats(userId: string): Promise<{
   totalRuns: number;
+  distinctAutomatedTestCount: number;
   completedRuns: number;
   runningRuns: number;
   passedRuns: number;
@@ -1251,6 +1252,7 @@ export async function getTestRunDashboardStats(userId: string): Promise<{
   // Using Prisma's aggregate so we never load every row into memory.
   const [
     totalRuns,
+    distinctAutomatedTestCount,
     completedCount,
     runningCount,
     failedCount,
@@ -1261,6 +1263,12 @@ export async function getTestRunDashboardStats(userId: string): Promise<{
     flakyTests,
   ] = await Promise.all([
     prisma.testRun.count({ where: { userId } }),
+    // Distinct generated (automated) test files, as opposed to `totalRuns`
+    // above which counts every execution — the same test file run 5 times
+    // counts once here and 5 times there. Kept separate so callers (notably
+    // the assistant) never have to infer "how many tests do I have" from a
+    // run-count.
+    prisma.generatedTest.count({ where: { feature: { userId } } }),
     prisma.testRun.count({ where: { userId, status: { not: "RUNNING" } } }),
     prisma.testRun.count({
       where: {
@@ -1292,6 +1300,7 @@ export async function getTestRunDashboardStats(userId: string): Promise<{
 
   return {
     totalRuns,
+    distinctAutomatedTestCount,
     completedRuns: completedCount,
     runningRuns: runningCount,
     passedRuns: passedCount,
