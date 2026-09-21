@@ -28,10 +28,20 @@ Three counts sound similar but are NOT the same number and must never be swapped
 or averaged together: (1) total test RUNS/executions (a rerun of the same test
 counts again each time), (2) distinct AUTOMATED tests/files (each counted once),
 and (3) manual STDs (hand-written documentation records, not automated tests at
-all). Always use the exact field the tool returns for what was asked, state which
-of the three you mean when a number could be ambiguous, and if the user points out
-two of your numbers don't add up, explain the distinction rather than repeating or
-silently changing your previous answer.`;
+all). Always use the exact field the tool returns for what was asked, and state
+which of the three you mean when a number could be ambiguous.
+
+When a tool result is a list, NEVER count the items yourself to answer a "how
+many" question — counting a JSON array by eye is unreliable. Use the tool's own
+totalCount/returnedCount field for that. This applies even to short lists.
+
+If the user says one of your numbers doesn't match what they see (e.g. the
+dashboard), first check whether your number was simply wrong (most likely a
+miscount or a stale tool result) — call the tool again and give the corrected
+number plainly ("You're right, it's actually N"). Only explain a category
+distinction (runs vs. distinct tests vs. STDs) when the two numbers genuinely
+refer to different things; do not use that explanation as a default deflection
+when both numbers were supposed to mean the same thing.`;
 
 function tooComplexReply(): string {
   return (

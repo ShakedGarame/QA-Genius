@@ -63,13 +63,16 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       const rawLimit = Number(args.limit);
       const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 10, 1), 30);
       const runs = await listTestRuns(userId, limit);
-      return runs.map((r) => ({
-        feature: r.feature_name,
-        file: r.test_file_name,
-        status: r.status,
-        durationMs: r.duration_ms,
-        createdAt: r.created_at,
-      }));
+      return {
+        returnedCount: runs.length,
+        items: runs.map((r) => ({
+          feature: r.feature_name,
+          file: r.test_file_name,
+          status: r.status,
+          durationMs: r.duration_ms,
+          createdAt: r.created_at,
+        })),
+      };
     },
   },
   {
@@ -100,51 +103,64 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     description:
       "List the user's manually generated Standard Test Documentation (STD) records: " +
       "feature name, detected domain, how many test cases each has, when created. " +
-      "Use for questions like 'how many STDs did I write'.",
+      "For 'how many STDs did I write', answer with the returned `totalCount` field — " +
+      "do NOT count the `items` array yourself, it may be truncated and even when it " +
+      "isn't, counting list items by hand is error-prone.",
     parameters: NO_PARAMS,
     execute: async (userId) => {
       const stds = await listManualStds(userId);
-      return stds.slice(0, 20).map((s) => ({
-        featureName: s.feature_name,
-        domain: s.domain,
-        testCaseCount: s.test_cases.length,
-        isMock: s.is_mock,
-        createdAt: s.created_at,
-      }));
+      return {
+        totalCount: stds.length,
+        items: stds.slice(0, 20).map((s) => ({
+          featureName: s.feature_name,
+          domain: s.domain,
+          testCaseCount: s.test_cases.length,
+          isMock: s.is_mock,
+          createdAt: s.created_at,
+        })),
+      };
     },
   },
   {
     name: "list_log_analyses",
     description:
       "List the user's AI log-analysis results: feature, severity, category, root cause, " +
-      "when analyzed. Use for questions about past failure investigations.",
+      "when analyzed. Use for questions about past failure investigations. For 'how many " +
+      "analyses' questions, answer with the returned `totalCount` field, not by counting `items`.",
     parameters: NO_PARAMS,
     execute: async (userId) => {
       const analyses = await listLogAnalyses(userId);
-      return analyses.slice(0, 20).map((a) => ({
-        feature: a.feature_name,
-        source: a.source,
-        severity: a.severity,
-        category: a.category,
-        rootCause: a.root_cause,
-        createdAt: a.created_at,
-      }));
+      return {
+        totalCount: analyses.length,
+        items: analyses.slice(0, 20).map((a) => ({
+          feature: a.feature_name,
+          source: a.source,
+          severity: a.severity,
+          category: a.category,
+          rootCause: a.root_cause,
+          createdAt: a.created_at,
+        })),
+      };
     },
   },
   {
     name: "list_features",
     description:
       "List the user's tracked features/user-flows: name, how many generated test files each " +
-      "has, and the status of its most recent run. Use for coverage-style questions.",
+      "has, and the status of its most recent run. Use for coverage-style questions. For 'how " +
+      "many features' questions, answer with the returned `totalCount` field, not by counting `items`.",
     parameters: NO_PARAMS,
     execute: async (userId) => {
       const groups = await listFeatureGroups(userId);
-      return groups.slice(0, 30).map((g) => ({
-        featureName: g.meta.featureName,
-        testCount: g.tests.length,
-        latestRunStatus: g.meta.latestRunStatus ?? null,
-        lastRunAt: g.meta.lastRunAt ?? null,
-      }));
+      return {
+        totalCount: groups.length,
+        items: groups.slice(0, 30).map((g) => ({
+          featureName: g.meta.featureName,
+          testCount: g.tests.length,
+          latestRunStatus: g.meta.latestRunStatus ?? null,
+          lastRunAt: g.meta.lastRunAt ?? null,
+        })),
+      };
     },
   },
 ];
