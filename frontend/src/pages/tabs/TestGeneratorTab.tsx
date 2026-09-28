@@ -3,8 +3,8 @@ import { useDropzone } from "react-dropzone";
 import {
   Play, Loader2, Sparkles, FileCode2, AlertCircle,
   CheckCircle2, RotateCcw, Save, Upload, FileText,
-  Code2, Globe, Tag, X, Square,
-  ClipboardList, ChevronUp,
+  Code2, Globe, Tag, X, Square, Bot, Pencil, Check,
+  ClipboardList, ChevronUp, ClipboardPaste,
 } from "lucide-react";
 import clsx from "clsx";
 import StoryPanel from "../../components/qa-genius/StoryPanel";
@@ -19,7 +19,20 @@ import { routeFailureLogsToAnalyzer, getActionableFailureLogs, readPendingGenera
 import SelfHealModal from "../../components/qa-genius/SelfHealModal";
 import { ParsedPrd, GenerateTestsResult, UserStory, InputType, GenerateManualStdResult } from "../../types";
 import { MOCK_CODE_MAP } from "../../data/mockData";
-import { EmptyState, PrimaryButton } from "../../components/ui/layout";
+import {
+  EmptyState,
+  PrimaryButton,
+  SecondaryButton,
+  IconButton,
+  SegmentedControl,
+  FormInput,
+  FormTextarea,
+  Badge,
+  Skeleton,
+  FOCUS_RING,
+} from "../../components/ui/layout";
+
+const FIELD_LABEL = "flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5";
 
 // Monaco is the single heaviest dependency in the app and is only needed once a
 // test has actually been generated — lazy-load it so it never ships in the
@@ -50,11 +63,11 @@ function FeatureNameInput({
 
   return (
     <div className="relative">
-      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-        <Tag className="w-3 h-3" /> Feature Name *
+      <label htmlFor="feature-name" className={FIELD_LABEL}>
+        <Tag className="w-3 h-3" aria-hidden /> Feature Name <span className="text-red-400/80" aria-hidden>*</span>
       </label>
       <div className="flex flex-col sm:flex-row gap-2">
-        <input
+        <FormInput
           id="feature-name"
           name="feature-name"
           autoComplete="off"
@@ -66,42 +79,46 @@ function FeatureNameInput({
           onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
           onKeyDown={(e) => e.key === "Enter" && value.trim() && onSave()}
           placeholder="e.g. Authentication, Shopping Cart…"
+          aria-invalid={!!error || undefined}
+          aria-describedby={error ? "feature-name-error" : "feature-name-hint"}
           className={clsx(
-            "flex-1 bg-surface-700 border rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500",
-            "focus:outline-none focus:ring-1 focus:ring-sky-500",
-            error ? "border-red-500/60" : isSaved ? "border-emerald-500/50" : "border-surface-500 focus:border-sky-500"
+            "flex-1",
+            error ? "!border-red-500/60" : isSaved && "!border-emerald-500/40"
           )}
         />
         <button
+          type="button"
           onClick={onSave}
           disabled={!value.trim() || isSaved}
           title={isSaved ? "Feature name saved" : "Save feature name"}
           className={clsx(
-            "flex-shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all w-full sm:w-auto",
+            "pressable flex-shrink-0 flex items-center justify-center gap-1.5 h-10 sm:h-9 px-3.5 rounded-lg text-xs font-medium w-full sm:w-auto border",
+            FOCUS_RING,
             isSaved
-              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default"
-              : "bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25 cursor-default"
+              : "bg-sky-600 hover:bg-sky-500 border-transparent disabled:opacity-40 disabled:cursor-not-allowed text-white"
           )}
         >
           {isSaved
-            ? <><CheckCircle2 className="w-3.5 h-3.5" /> Saved</>
-            : <><Save className="w-3.5 h-3.5" /> Save</>
+            ? <><CheckCircle2 className="w-3.5 h-3.5" aria-hidden /> Saved</>
+            : <><Save className="w-3.5 h-3.5" aria-hidden /> Save</>
           }
         </button>
       </div>
-      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
-      {!isSaved && (
-        <p className="text-[10px] text-slate-600 mt-1">
+      {error && <p id="feature-name-error" role="alert" className="text-xs text-red-400 mt-1.5">{error}</p>}
+      {!isSaved && !error && (
+        <p id="feature-name-hint" className="text-[11px] text-slate-500 mt-1.5">
           Save the feature name before configuring inputs
         </p>
       )}
       {showSuggestions && filtered.length > 0 && (
-        <div className="absolute z-10 mt-1 w-full bg-surface-700 border border-surface-500 rounded-lg shadow-xl overflow-hidden">
+        <div className="absolute z-10 mt-1 w-full sm:w-[calc(100%-5.5rem)] bg-surface-800 border border-surface-600 rounded-lg shadow-xl shadow-black/40 overflow-hidden p-1 origin-top animate-pop-in">
           {filtered.slice(0, 5).map((s) => (
             <button
               key={s}
+              type="button"
               onMouseDown={() => { onChange(s); }}
-              className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-surface-600 hover:text-white transition-colors"
+              className="w-full text-left px-2.5 py-1.5 rounded-md text-sm text-slate-300 hover:bg-surface-700 hover:text-white transition-colors"
             >
               {s}
             </button>
@@ -124,33 +141,19 @@ function GeneratorModeToggle({
 }) {
   return (
     <div>
-      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-        <Sparkles className="w-3 h-3" /> Generator Mode
-      </label>
-      <div className="flex gap-1 p-1 bg-surface-700 rounded-lg">
-        <button
-          onClick={() => onChange("playwright")}
-          className={clsx(
-            "flex-1 flex items-center justify-center py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
-            value === "playwright"
-              ? "bg-sky-600 text-white shadow"
-              : "text-slate-400 hover:text-slate-200"
-          )}
-        >
-          <span className="truncate">🤖 Automation</span>
-        </button>
-        <button
-          onClick={() => onChange("manual-std")}
-          className={clsx(
-            "flex-1 flex items-center justify-center py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
-            value === "manual-std"
-              ? "bg-emerald-600 text-white shadow"
-              : "text-slate-400 hover:text-slate-200"
-          )}
-        >
-          <span className="truncate">📋 Manual STD</span>
-        </button>
-      </div>
+      <p className={FIELD_LABEL}>
+        <Sparkles className="w-3 h-3" aria-hidden /> Generator Mode
+      </p>
+      <SegmentedControl<GeneratorMode>
+        ariaLabel="Generator mode"
+        value={value}
+        onChange={onChange}
+        fullWidth
+        options={[
+          { id: "playwright", label: "Automation", icon: Bot, activeClassName: "bg-sky-600 text-white shadow-sm shadow-black/30" },
+          { id: "manual-std", label: "Manual STD", icon: ClipboardList, activeClassName: "bg-emerald-600 text-white shadow-sm shadow-black/30" },
+        ]}
+      />
     </div>
   );
 }
@@ -165,36 +168,20 @@ function InputTypeToggle({
 }) {
   return (
     <div>
-      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-        <Code2 className="w-3 h-3" /> Test Type
-      </label>
-      <div className="flex gap-1 p-1 bg-surface-700 rounded-lg">
-        <button
-          onClick={() => onChange("prd")}
-          className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all",
-            value === "prd"
-              ? "bg-sky-600 text-white shadow"
-              : "text-slate-400 hover:text-slate-200"
-          )}
-        >
-          <FileText className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">UI (PRD)</span>
-        </button>
-        <button
-          onClick={() => onChange("swagger")}
-          className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all min-w-0",
-            value === "swagger"
-              ? "bg-violet-600 text-white shadow"
-              : "text-slate-400 hover:text-slate-200"
-          )}
-        >
-          <Globe className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">API (Swagger)</span>
-        </button>
-      </div>
-      <p className="text-[10px] text-slate-600 mt-1">
+      <p className={FIELD_LABEL}>
+        <Code2 className="w-3 h-3" aria-hidden /> Test Type
+      </p>
+      <SegmentedControl<InputType>
+        ariaLabel="Test type"
+        value={value}
+        onChange={onChange}
+        fullWidth
+        options={[
+          { id: "prd", label: "UI (PRD)", icon: FileText, activeClassName: "bg-sky-600 text-white shadow-sm shadow-black/30" },
+          { id: "swagger", label: "API (Swagger)", icon: Globe, activeClassName: "bg-violet-600 text-white shadow-sm shadow-black/30" },
+        ]}
+      />
+      <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
         {value === "prd"
           ? "Generates Playwright UI tests with Page Object Model + getByRole locators"
           : "Generates Playwright API tests using request.get/post with status & payload assertions"}
@@ -271,29 +258,28 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 p-0.5 bg-surface-700 rounded-lg w-fit">
-        {(["upload", "paste"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={clsx(
-              "px-3 py-1 rounded-md text-xs font-medium transition-all",
-              tab === t ? "bg-surface-600 text-white shadow" : "text-slate-400 hover:text-slate-200"
-            )}
-          >
-            {t === "upload" ? `Upload ${formats}` : "Paste Text"}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl<"upload" | "paste">
+        ariaLabel="Input method"
+        size="sm"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { id: "upload", label: `Upload ${formats}`, icon: Upload },
+          { id: "paste", label: "Paste Text", icon: ClipboardPaste },
+        ]}
+      />
 
       {tab === "upload" ? (
         <div
           {...getRootProps()}
           className={clsx(
-            "border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all",
+            "border border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors duration-150",
+            FOCUS_RING,
             isDragActive
-              ? inputType === "swagger" ? "border-violet-500 bg-violet-500/10" : "border-sky-500 bg-sky-500/10"
-              : "border-surface-500 hover:border-surface-400 bg-surface-800/50"
+              ? inputType === "swagger" ? "border-violet-500/70 bg-violet-500/10" : "border-sky-500/70 bg-sky-500/10"
+              : uploadedFile
+                ? "border-emerald-500/30 bg-emerald-500/5"
+                : "border-surface-500 hover:border-slate-500 hover:bg-surface-800/70 bg-surface-900/40"
           )}
         >
           <input {...getInputProps()} />
@@ -303,32 +289,34 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
               <p className="text-xs text-slate-300">Parsing…</p>
             </div>
           ) : uploadedFile ? (
-            <div className="flex items-center justify-center gap-2 min-w-0">
-              <FileText className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+            <div className="flex items-center justify-center gap-2 min-w-0 animate-fade-in">
+              <FileText className="w-5 h-5 text-emerald-400 flex-shrink-0" aria-hidden />
               <span className="max-w-[220px] truncate font-mono text-xs text-white" title={uploadedFile.name}>
                 {uploadedFile.name}
               </span>
-              <button
+              <span className="text-[11px] text-slate-500 tabular-nums">{(uploadedFile.size / 1024).toFixed(1)} KB</span>
+              <IconButton
+                icon={X}
+                label="Remove file"
+                size="sm"
+                tone="danger"
                 onClick={(e) => { e.stopPropagation(); setUploadedFile(null); }}
-                title="Remove file"
-                className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded hover:bg-surface-700 text-slate-500 hover:text-red-400 transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              />
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2">
-              <Upload className="w-7 h-7 text-slate-500" />
-              <p className="text-sm text-slate-400">
-                {isDragActive ? "Drop it!" : `Drag & drop ${formats}`}
+              <Upload className={clsx("w-6 h-6 transition-colors", isDragActive ? "text-sky-400" : "text-slate-500")} aria-hidden />
+              <p className="text-sm text-slate-300">
+                {isDragActive ? "Drop to upload" : `Drag & drop ${formats}`}
               </p>
-              <p className="text-xs text-slate-600">or click to browse · max 10 MB</p>
+              <p className="text-xs text-slate-500">or click to browse · max 10 MB</p>
             </div>
           )}
         </div>
       ) : (
         <div className="space-y-2">
-          <textarea
+          <FormTextarea
+            aria-label={inputType === "swagger" ? "OpenAPI spec" : "PRD text"}
             value={pasteText}
             onChange={(e) => {
               setPasteText(e.target.value);
@@ -336,10 +324,7 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
             }}
             placeholder={placeholder}
             rows={8}
-            className={clsx(
-              "w-full bg-surface-800 border rounded-lg px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono resize-none",
-              pasteSaved ? "border-emerald-500/40" : "border-surface-600"
-            )}
+            className={clsx("px-3 py-2.5", pasteSaved && "!border-emerald-500/40")}
           />
           <div className="flex items-center gap-2 flex-wrap">
             <button
@@ -347,10 +332,11 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
               onClick={handlePasteSubmit}
               disabled={!pasteText.trim() || isLoading || pasteSaved}
               className={clsx(
-                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all",
+                "pressable flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-medium border",
+                FOCUS_RING,
                 pasteSaved
-                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default"
-                  : "bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white"
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25 cursor-default"
+                  : "bg-sky-600 hover:bg-sky-500 border-transparent disabled:opacity-50 disabled:cursor-not-allowed text-white"
               )}
             >
               {isLoading ? (
@@ -363,7 +349,7 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
               {isLoading ? "Parsing…" : pasteSaved ? "Saved" : "Parse"}
             </button>
             {pasteSaved && (
-              <span className="text-[11px] text-emerald-400/90">
+              <span className="text-[11px] text-emerald-400/90 animate-fade-in">
                 Text saved — ready for Generate
               </span>
             )}
@@ -372,10 +358,65 @@ function InputArea({ inputType, onReady, isLoading }: InputAreaProps) {
       )}
 
       {fileError && (
-        <p className="text-xs text-red-400 flex items-center gap-1">
-          <X className="w-3.5 h-3.5" /> {fileError}
+        <p role="alert" className="text-xs text-red-400 flex items-center gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden /> {fileError}
         </p>
       )}
+    </div>
+  );
+}
+
+// ─── Loading placeholders ─────────────────────────────────────────────────────
+
+/** Editor-shaped placeholder so the code pane lands in place instead of
+ * replacing a centered spinner. */
+function EditorSkeleton() {
+  const widths = [38, 62, 0, 24, 70, 56, 44, 0, 30, 66, 50, 58, 20];
+  return (
+    <div className="h-[70vh] min-h-[420px] rounded-lg border border-surface-700 bg-surface-900 overflow-hidden" aria-hidden>
+      <div className="h-9 border-b border-surface-700 bg-surface-800/60 flex items-center px-3">
+        <Skeleton className="h-3 w-32" />
+      </div>
+      <div className="p-4 space-y-2.5">
+        {widths.map((w, i) => (
+          <div key={i} className="flex items-center gap-4">
+            <span className="w-5 text-right text-[11px] font-mono text-slate-700 tabular-nums">{i + 1}</span>
+            {w > 0 && <Skeleton className="h-3" style={{ width: `${w}%` }} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GeneratingStatus({
+  tone,
+  title,
+  detail,
+  children,
+}: {
+  tone: "sky" | "violet" | "emerald";
+  title: string;
+  detail: string;
+  children: React.ReactNode;
+}) {
+  const toneClass = {
+    sky: "bg-sky-500/10 border-sky-500/20 text-sky-400",
+    violet: "bg-violet-500/10 border-violet-500/20 text-violet-400",
+    emerald: "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
+  }[tone];
+  return (
+    <div className="space-y-4 animate-fade-in" role="status" aria-live="polite">
+      <div className="flex items-center gap-3">
+        <div className={clsx("w-9 h-9 rounded-lg border flex items-center justify-center flex-shrink-0", toneClass)}>
+          <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-100">{title}</p>
+          <p className="text-xs text-slate-500 truncate">{detail}</p>
+        </div>
+      </div>
+      {children}
     </div>
   );
 }
@@ -752,64 +793,71 @@ export default function TestGeneratorTab() {
       {/* ── Top: compact config card (collapses to a sticky summary once generation starts) ── */}
       <div className={clsx("flex-shrink-0 p-4 sm:p-6 pb-4", configCollapsed && "sticky top-0 z-10 bg-surface-900")}>
         {configCollapsed ? (
-          <div className="flex items-center gap-2 flex-wrap bg-surface-800/60 border border-surface-700 rounded-xl px-4 py-2.5 text-xs text-slate-300">
-            <span className="text-slate-500">Feature:</span>
-            <span className="font-semibold text-slate-200 truncate max-w-[200px]">{featureName}</span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-500">Mode:</span>
-            <span>{generatorMode === "manual-std" ? "📋 Manual" : "🤖 Automation"}</span>
+          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap bg-surface-800/80 backdrop-blur-sm border border-surface-700 rounded-xl pl-4 pr-2 py-2 text-xs animate-fade-in">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className="text-slate-500">Feature</span>
+              <span className="font-medium text-slate-200 truncate max-w-[200px]">{featureName}</span>
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-300">
+              {generatorMode === "manual-std"
+                ? <><ClipboardList className="w-3.5 h-3.5 text-emerald-400" aria-hidden /> Manual STD</>
+                : <><Bot className="w-3.5 h-3.5 text-sky-400" aria-hidden /> Automation</>}
+            </span>
             {pendingInput?.file?.name && (
-              <>
-                <span className="text-slate-600">|</span>
-                <span className="text-slate-500">File:</span>
+              <span className="flex items-center gap-1.5 min-w-0">
+                <FileText className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" aria-hidden />
                 <span className="truncate max-w-[180px] font-mono text-slate-400" title={pendingInput.file.name}>
                   {pendingInput.file.name}
                 </span>
-              </>
+              </span>
             )}
-            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-              <button
-                onClick={handleReset}
-                title="Clear the form and start a new test"
-                className="border border-surface-700 hover:bg-surface-800 text-surface-200 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
-              >
-                🔄 New Test
-              </button>
-              <button
-                onClick={() => setConfigCollapsed(false)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 transition-colors"
-              >
-                ✏️ Edit Configuration
-              </button>
+            <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+              <SecondaryButton onClick={handleReset} title="Clear the form and start a new test" className="bg-transparent">
+                <RotateCcw className="w-3.5 h-3.5" aria-hidden />
+                New test
+              </SecondaryButton>
+              <SecondaryButton onClick={() => setConfigCollapsed(false)}>
+                <Pencil className="w-3.5 h-3.5" aria-hidden />
+                Edit configuration
+              </SecondaryButton>
             </div>
           </div>
         ) : (
-        <div className="bg-surface-800/60 border border-surface-700 rounded-xl p-5 space-y-4">
-          {/* Stage breadcrumb */}
+        <div className="bg-surface-800/50 border border-surface-700 rounded-xl p-4 sm:p-5 space-y-5">
+          {/* Stage stepper */}
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1">
-              {stageList.map((s, i) => (
-                <div key={s} className="flex items-center gap-1">
-                  {i > 0 && <div className="w-3 h-px bg-surface-500" />}
-                  <span className={clsx(
-                    "text-[10px] px-1.5 py-0.5 rounded",
-                    stage === s ? "bg-sky-500/20 text-sky-300" : i < stageIdx ? "text-emerald-400" : "text-slate-600"
-                  )}>
-                    {i < stageIdx && <CheckCircle2 className="w-2.5 h-2.5 inline mr-0.5" />}
-                    {s === "configure" ? "1.Configure" : s === "generated" ? "2.Generate" : "3.Execute"}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <ol className="flex items-center gap-2" aria-label="Progress">
+              {stageList.map((s, i) => {
+                const done = i < stageIdx;
+                const current = stage === s;
+                return (
+                  <li key={s} className="flex items-center gap-2" aria-current={current ? "step" : undefined}>
+                    {i > 0 && <span className={clsx("w-5 h-px", done || current ? "bg-sky-500/40" : "bg-surface-600")} aria-hidden />}
+                    <span className={clsx(
+                      "flex items-center gap-1.5 text-[11px] font-medium transition-colors",
+                      current ? "text-sky-300" : done ? "text-emerald-400" : "text-slate-500"
+                    )}>
+                      <span className={clsx(
+                        "w-4 h-4 rounded-full inline-flex items-center justify-center text-[9px] font-semibold border tabular-nums",
+                        current ? "border-sky-500/50 bg-sky-500/15" : done ? "border-emerald-500/40 bg-emerald-500/15" : "border-surface-500"
+                      )}>
+                        {done ? <Check className="w-2.5 h-2.5" aria-hidden /> : i + 1}
+                      </span>
+                      {s === "configure" ? "Configure" : s === "generated" ? "Generate" : "Execute"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
             {(genResult || stdResult) && (
-              <button
+              <SecondaryButton
                 onClick={() => setConfigCollapsed(true)}
                 title="Minimize back into the summary bar"
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors flex-shrink-0"
+                className="bg-transparent border-transparent"
               >
-                <ChevronUp className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Collapse Panel</span>
-              </button>
+                <ChevronUp className="w-3.5 h-3.5" aria-hidden />
+                <span className="hidden sm:inline">Collapse</span>
+              </SecondaryButton>
             )}
           </div>
 
@@ -850,10 +898,10 @@ export default function TestGeneratorTab() {
                 <InputTypeToggle value={inputType} onChange={(v) => { setInputType(v); setPendingInput(null); setUserStories([]); }} />
               </div>
               <div className="flex-1 min-w-0">
-                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  <Upload className="w-3 h-3" />
+                <p className={FIELD_LABEL}>
+                  <Upload className="w-3 h-3" aria-hidden />
                   {inputType === "swagger" ? "Swagger / OpenAPI Spec" : "PRD Document"}
-                </label>
+                </p>
                 <InputArea
                   key={formKey}
                   inputType={inputType}
@@ -867,8 +915,8 @@ export default function TestGeneratorTab() {
           {/* User stories preview (PRD mode) */}
           {featureNameSaved && inputType === "prd" && userStories.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                Detected Stories ({userStories.length})
+              <p className={FIELD_LABEL}>
+                Detected Stories <span className="tabular-nums text-slate-500">({userStories.length})</span>
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {userStories.map((s) => (
@@ -876,11 +924,13 @@ export default function TestGeneratorTab() {
                     key={s.id}
                     onClick={() => setActiveStoryId(s.id)}
                     title={s.title}
+                    aria-pressed={activeStoryId === s.id}
                     className={clsx(
-                      "text-left text-xs px-2.5 py-1.5 rounded-lg border transition-all truncate max-w-[220px]",
+                      "pressable text-left text-xs px-2.5 py-1.5 rounded-lg border truncate max-w-[220px]",
+                      FOCUS_RING,
                       activeStoryId === s.id
                         ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
-                        : "border-surface-600 bg-surface-800 text-slate-400 hover:text-slate-200"
+                        : "border-surface-600 bg-surface-800 text-slate-400 hover:text-slate-200 hover:border-surface-500"
                     )}
                   >
                     {s.title}
@@ -892,11 +942,11 @@ export default function TestGeneratorTab() {
 
           {/* Generate button — only show once feature name is saved */}
           {featureNameSaved && (
-            <div className="pt-3 border-t border-surface-700 space-y-2">
+            <div className="pt-4 border-t border-surface-700 space-y-2">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 {savedAs && (
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2.5 py-1.5 flex-shrink-0">
-                    <Save className="w-3 h-3 flex-shrink-0" />
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 h-8 flex-shrink-0">
+                    <Save className="w-3 h-3 flex-shrink-0" aria-hidden />
                     <span className="max-w-[200px] truncate font-mono" title={`${featureSlug}/${savedAs}`}>{featureSlug}/{savedAs}</span>
                   </div>
                 )}
@@ -922,19 +972,20 @@ export default function TestGeneratorTab() {
                       {isGenerating ? "Generating…" : inputType === "swagger" ? "Generate API Tests" : "Generate UI Tests"}
                     </PrimaryButton>
                   )}
-                  <button
+                  <SecondaryButton
                     onClick={handleReset}
                     title="Clear the form and start a new test"
-                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-surface-700 hover:bg-surface-600 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+                    aria-label="New test"
+                    className="h-10 px-3.5 flex-shrink-0"
                   >
-                    <RotateCcw className="w-4 h-4" />
+                    <RotateCcw className="w-4 h-4" aria-hidden />
                     <span className="hidden sm:inline">New Test</span>
-                  </button>
+                  </SecondaryButton>
                 </div>
               </div>
               {(generatorMode === "manual-std" ? stdError : genError) && (
-                <p className="text-xs text-red-400 flex items-center gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" /> {generatorMode === "manual-std" ? stdError : genError}
+                <p role="alert" className="text-xs text-red-400 flex items-start gap-1.5 animate-fade-in">
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-px" aria-hidden /> {generatorMode === "manual-std" ? stdError : genError}
                 </p>
               )}
             </div>
@@ -958,17 +1009,22 @@ export default function TestGeneratorTab() {
             )}
 
             {isGeneratingStd && (
-              <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4">
-                <div className="w-14 h-14 rounded-full border flex items-center justify-center bg-emerald-500/10 border-emerald-500/20">
-                  <ClipboardList className="w-6 h-6 animate-pulse text-emerald-400" />
+              <GeneratingStatus
+                tone="emerald"
+                title="Generating Manual STD…"
+                detail="Detecting hidden requirements · Applying mandatory category coverage · Domain adaptation"
+              >
+                <div className="rounded-xl border border-surface-700 overflow-hidden">
+                  <div className="flex gap-4 px-4 py-3 bg-surface-800/60 border-b border-surface-700">
+                    {[10, 28, 18, 30, 14].map((w, i) => <Skeleton key={i} className="h-3" style={{ width: `${w}%` }} />)}
+                  </div>
+                  {Array.from({ length: 5 }).map((_, r) => (
+                    <div key={r} className="flex gap-4 px-4 py-3.5 border-b border-surface-700/60 last:border-0" style={{ opacity: 1 - r * 0.15 }}>
+                      {[10, 28, 18, 30, 14].map((w, i) => <Skeleton key={i} className="h-3" style={{ width: `${w}%` }} />)}
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <p className="text-slate-200 font-medium">Generating Manual STD…</p>
-                  <p className="text-sm text-slate-400 mt-1">
-                    Detecting hidden requirements · Applying mandatory category coverage · Domain adaptation
-                  </p>
-                </div>
-              </div>
+              </GeneratingStatus>
             )}
 
             {stdResult && !isGeneratingStd && (
@@ -999,71 +1055,52 @@ export default function TestGeneratorTab() {
         )}
 
         {isGenerating && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4">
-            <div className={clsx(
-              "w-14 h-14 rounded-full border flex items-center justify-center",
-              inputType === "swagger" ? "bg-violet-500/10 border-violet-500/20" : "bg-sky-500/10 border-sky-500/20"
-            )}>
-              <Sparkles className={clsx("w-6 h-6 animate-pulse", inputType === "swagger" ? "text-violet-400" : "text-sky-400")} />
+          <GeneratingStatus
+            tone={inputType === "swagger" ? "violet" : "sky"}
+            title={inputType === "swagger" ? "Generating API integration tests…" : "Generating UI tests…"}
+            detail={inputType === "swagger"
+              ? "Parsing endpoints · Creating request/response assertions"
+              : "Applying Page Object Model · industry-standard locators"}
+          >
+            <div className="flex flex-col lg:grid lg:grid-cols-2 gap-4">
+              <EditorSkeleton />
+              <div className="hidden lg:block h-[70vh] min-h-[420px] rounded-lg border border-dashed border-surface-700 bg-surface-900/40" />
             </div>
-            <div>
-              <p className="text-slate-200 font-medium">
-                {inputType === "swagger" ? "Generating API integration tests…" : "Generating UI tests…"}
-              </p>
-              <p className="text-sm text-slate-400 mt-1">
-                {inputType === "swagger"
-                  ? "Parsing endpoints · Creating request/response assertions"
-                  : "Applying Page Object Model · industry-standard locators"}
-              </p>
-            </div>
-          </div>
+          </GeneratingStatus>
         )}
 
         {genResult && !isGenerating && (
           <>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
               <div className="flex items-center gap-2 flex-wrap min-w-0">
-                <span className="text-xs text-slate-400">Generated Tests</span>
-                <span className={clsx(
-                  "text-[10px] px-2 py-0.5 rounded-full border font-mono",
-                  genResult.isMock
-                    ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                )}>
-                  {genResult.isMock ? "MOCK" : genResult.model}
-                </span>
-                <span className={clsx(
-                  "text-[10px] px-2 py-0.5 rounded-full border",
-                  inputType === "swagger"
-                    ? "bg-violet-500/10 text-violet-400 border-violet-500/30"
-                    : "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                )}>
-                  {inputType === "swagger" ? "API" : "UI"}
-                </span>
+                <h2 className="text-sm font-semibold text-slate-100 mr-1">Generated Tests</h2>
+                <Badge tone={inputType === "swagger" ? "accent" : "info"}>{inputType === "swagger" ? "API" : "UI"}</Badge>
+                {genResult.isMock
+                  ? <Badge tone="warning">Mock</Badge>
+                  : <Badge tone="neutral" className="normal-case font-mono tracking-normal">{genResult.model}</Badge>}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 self-start sm:self-auto">
                 {isRunning ? (
                   <>
-                    <span className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium select-none">
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                    <span role="status" className="flex items-center gap-2 h-9 px-4 bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-sm font-medium select-none">
+                      <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
                       Running…
                     </span>
-                    <button
-                      type="button"
+                    <IconButton
+                      icon={Square}
+                      label="Stop run"
+                      tone="danger"
                       onClick={stopTest}
-                      title="Stop run"
-                      className="flex items-center justify-center w-9 h-9 rounded-lg text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 transition-colors"
-                    >
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                    </button>
+                      className="w-9 h-9 text-red-400 bg-red-500/10 border border-red-500/25"
+                    />
                   </>
                 ) : (
                   <button
                     type="button"
                     onClick={handleRun}
-                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    className={clsx("pressable flex items-center gap-2 h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium shadow-sm shadow-black/30 ring-1 ring-inset ring-white/10", FOCUS_RING)}
                   >
-                    <Play className="w-4 h-4 fill-white" />
+                    <Play className="w-4 h-4 fill-white" aria-hidden />
                     Run Test
                   </button>
                 )}
@@ -1073,11 +1110,7 @@ export default function TestGeneratorTab() {
             <div className="flex flex-col lg:grid lg:grid-cols-2 gap-4 pb-6">
               <div className="h-[70vh] min-h-[420px]">
                 <Suspense
-                  fallback={
-                    <div className="w-full h-full flex items-center justify-center bg-surface-800 rounded-lg border border-surface-600">
-                      <Loader2 className="w-6 h-6 text-slate-500 animate-spin" />
-                    </div>
-                  }
+                  fallback={<EditorSkeleton />}
                 >
                   <TestEditor
                     code={editedCode}
@@ -1111,7 +1144,7 @@ export default function TestGeneratorTab() {
                     )}
                   </>
                 ) : (
-                  <div className="h-[70vh] min-h-[420px] flex items-center justify-center rounded-lg border border-dashed border-surface-600 bg-surface-900/40 px-6">
+                  <div className="h-[70vh] min-h-[420px] flex items-center justify-center rounded-lg border border-dashed border-surface-700 bg-surface-900/40 px-6">
                     <EmptyState
                       icon={Play}
                       accent="emerald"

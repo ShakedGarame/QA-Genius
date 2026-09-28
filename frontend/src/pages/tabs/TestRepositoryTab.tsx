@@ -1,102 +1,42 @@
 import { useEffect, useState } from "react";
 import {
-  RefreshCw, Play, Trash2, FileCode2, Loader2,
+  RefreshCw, Play, Trash2, FileCode2,
   Globe, FileText, FlaskConical,
-  ChevronDown, ChevronRight, Search,
-  ClipboardList, Eye, Download, Share2,
+  ChevronRight, Search, Bot,
+  ClipboardList, Eye, Share2,
 } from "lucide-react";
 import clsx from "clsx";
+import { toast } from "sonner";
 import { useTestRepository } from "../../hooks/useTestRepository";
 import { useManualStds } from "../../hooks/useManualStds";
 import { FeatureGroup, TestFileInfo, ManualStdRecord } from "../../types";
-import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
+import { MOCK_FEATURES } from "../../data/mockData";
 import { routeRunToGenerator } from "../../lib/cloudRunner";
 import { exportStdToPdf } from "../../lib/exportStd";
+import { formatAbsoluteDate, formatRelativeDate } from "../../lib/formatDuration";
 import ManualStdViewerModal from "../../components/qa-genius/ManualStdViewerModal";
 import ShowcaseModal from "../../components/qa-genius/ShowcaseModal";
+import CodeViewerModal, { fetchTestCode } from "../../components/qa-genius/CodeViewerModal";
+import ManualStdCard from "../../components/qa-genius/ManualStdCard";
 import {
   TabToolbar,
   TabContent,
   EmptyState,
-  LoadingState,
+  SkeletonCardList,
   DemoBanner,
   ErrorBanner,
   SecondaryButton,
   FormInput,
+  SegmentedControl,
+  IconButton,
+  Badge,
+  FOCUS_RING,
 } from "../../components/ui/layout";
 
 type RepoView = "automation" | "manual-std";
 
-const REPO_TABS: { id: RepoView; label: string }[] = [
-  { id: "automation", label: "🤖 Automation Suites" },
-  { id: "manual-std", label: "📋 Manual STDs" },
-];
-
-const DOMAIN_LABELS: Record<string, string> = {
-  fintech: "FinTech-Adaptive",
-  auth: "Auth-Adaptive",
-  gaming: "Gaming-Adaptive",
-  general: "General",
-};
-
-const DOMAIN_STYLES: Record<string, string> = {
-  fintech: "bg-violet-500/10 text-violet-400 border-violet-500/30",
-  auth: "bg-blue-500/10 text-blue-400 border-blue-500/30",
-  gaming: "bg-pink-500/10 text-pink-400 border-pink-500/30",
-  general: "bg-slate-500/10 text-slate-400 border-slate-500/30",
-};
-
 function formatBytes(b: number) {
   return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`;
-}
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString();
-}
-
-async function fetchTestCode(file: TestFileInfo, isMock: boolean): Promise<string> {
-  if (isMock) return MOCK_CODE_MAP[file.relativePath] ?? "// Sample code not found";
-  try {
-    const res = await fetch(
-      `/api/tests/${encodeURIComponent(file.featureSlug)}/${encodeURIComponent(file.fileName)}`,
-      { credentials: "include" }
-    );
-    const d = await res.json();
-    return d.code ?? "// Failed to load";
-  } catch {
-    return "// Failed to load test code";
-  }
-}
-
-// ─── Code view modal ──────────────────────────────────────────────────────────
-
-function CodeModal({ file, isMock, onClose }: { file: TestFileInfo; isMock: boolean; onClose: () => void }) {
-  const [code, setCode] = useState<string | null>(null);
-
-  useEffect(() => {
-    setCode(null);
-    void fetchTestCode(file, isMock).then(setCode);
-  }, [file, isMock]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-      <div className="w-full max-w-3xl h-[80vh] bg-surface-800 border border-surface-600 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-600 bg-surface-700 flex-shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <FileCode2 className="w-4 h-4 text-slate-400 flex-shrink-0" />
-            <span className="text-sm font-mono text-slate-200 truncate">{file.relativePath}</span>
-          </div>
-          <button onClick={onClose} className="px-3 py-1 text-xs text-slate-400 hover:text-white bg-surface-600 hover:bg-surface-500 rounded transition-colors flex-shrink-0">
-            Close
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto p-5">
-          {code === null
-            ? <div className="flex items-center justify-center h-full text-slate-500"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
-            : <pre className="text-xs font-mono text-slate-300 leading-5 whitespace-pre-wrap">{code}</pre>}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── Automation feature card ──────────────────────────────────────────────────
@@ -115,192 +55,108 @@ interface FeatureCardProps {
 function FeatureCard({ group, onViewFile, onRunFile, onDeleteFile, onDeleteFeature, onShareFile, isMock = false, runningPath }: FeatureCardProps) {
   const [expanded, setExpanded] = useState(true);
   const { meta, tests } = group;
+  const isApi = meta.inputType === "swagger";
+  const panelId = `feature-files-${meta.slug}`;
 
   return (
-    <div className="rounded-xl border overflow-hidden transition-all bg-surface-800/50 border-surface-600">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded((v) => !v)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded((v) => !v); } }}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-800/60 transition-colors text-left cursor-pointer"
-      >
-        <div className={clsx(
-          "w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0",
-          meta.inputType === "swagger"
-            ? "bg-violet-500/20 border border-violet-500/30"
-            : "bg-sky-500/20 border border-sky-500/30"
-        )}>
-          {meta.inputType === "swagger"
-            ? <Globe className="w-4 h-4 text-violet-400" />
-            : <FileText className="w-4 h-4 text-sky-400" />}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-100 truncate">{meta.featureName}</p>
-          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-            <span className={clsx(
-              "text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border",
-              meta.inputType === "swagger"
-                ? "bg-violet-500/15 text-violet-400 border-violet-500/20"
-                : "bg-sky-500/15 text-sky-400 border-sky-500/20"
-            )}>
-              {meta.inputType === "swagger" ? "API" : "UI"}
-            </span>
-            <span className="text-[10px] text-slate-500">{tests.length} test file{tests.length !== 1 ? "s" : ""}</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {!isMock && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onDeleteFeature(meta.slug); }}
-              title="Delete feature"
-              className="p-1.5 rounded hover:bg-surface-600 text-slate-600 hover:text-red-400 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+    <article className="rounded-xl border border-surface-700 bg-surface-800/50 overflow-hidden transition-colors hover:border-surface-600">
+      <div className="flex items-center gap-2 pr-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          className={clsx(
+            "flex-1 min-w-0 flex items-center gap-3 pl-4 py-3 text-left rounded-xl",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500/70"
           )}
-          {expanded ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
-        </div>
+        >
+          <ChevronRight
+            className={clsx(
+              "w-4 h-4 text-slate-500 flex-shrink-0 transition-transform duration-200 ease-out",
+              expanded && "rotate-90"
+            )}
+            aria-hidden
+          />
+          <div className={clsx(
+            "w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 border",
+            isApi ? "bg-violet-500/10 border-violet-500/20" : "bg-sky-500/10 border-sky-500/20"
+          )}>
+            {isApi
+              ? <Globe className="w-4 h-4 text-violet-400" aria-hidden />
+              : <FileText className="w-4 h-4 text-sky-400" aria-hidden />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-100 truncate">{meta.featureName}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <Badge tone={isApi ? "accent" : "info"}>{isApi ? "API" : "UI"}</Badge>
+              <span className="text-[11px] text-slate-500 tabular-nums">
+                {tests.length} test file{tests.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+          </div>
+        </button>
+        {!isMock && (
+          <IconButton icon={Trash2} label={`Delete feature ${meta.featureName}`} tone="danger" onClick={() => onDeleteFeature(meta.slug)} />
+        )}
       </div>
 
       {expanded && (
-        <div className="bg-surface-900/50 p-3 space-y-1.5 animate-fade-in border-t border-surface-600">
+        <div id={panelId} className="border-t border-surface-700 bg-surface-900/40 p-2 animate-fade-in">
           {tests.length === 0 ? (
-            <p className="text-xs text-slate-600 px-2 py-2">No test files in this feature</p>
+            <p className="text-xs text-slate-500 px-3 py-2">No test files in this feature</p>
           ) : (
-            tests.map((file) => (
-              <div
-                key={file.relativePath}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg border border-surface-600 bg-surface-800/50"
-              >
-                <FileCode2 className="w-4 h-4 text-slate-500 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs font-mono text-slate-200 truncate block">{file.fileName}</span>
-                  <p className="text-[10px] text-slate-600 truncate font-mono mt-0.5">
-                    {formatBytes(file.sizeBytes)} · {formatDate(file.modifiedAt)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-0.5 flex-shrink-0">
-                  <button
-                    onClick={() => onViewFile(file, isMock)}
-                    title="View source code"
-                    className="p-1.5 rounded hover:bg-surface-600 text-slate-500 hover:text-slate-200 transition-colors"
+            <ul className="space-y-0.5">
+              {tests.map((file) => {
+                const running = runningPath === file.relativePath;
+                return (
+                  <li
+                    key={file.relativePath}
+                    className="group flex items-center gap-3 pl-3 pr-1.5 py-1.5 rounded-lg transition-colors hover:bg-surface-800/80"
                   >
-                    <Eye className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => onRunFile(file, isMock)}
-                    title="Run in Test Generator"
-                    disabled={runningPath === file.relativePath}
-                    className="p-1.5 rounded hover:bg-surface-600 text-emerald-500 hover:text-emerald-400 transition-colors disabled:opacity-50"
-                  >
-                    {runningPath === file.relativePath ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                  </button>
-                  {!isMock && (
-                    <button
-                      onClick={() => onShareFile(file)}
-                      title="Share Showcase Link"
-                      className="p-1.5 rounded hover:bg-surface-600 text-slate-500 hover:text-sky-400 transition-colors"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  {!isMock && (
-                    <button
-                      onClick={() => onDeleteFile(file)}
-                      title="Delete file"
-                      className="p-1.5 rounded hover:bg-surface-600 text-slate-600 hover:text-red-400 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))
+                    <FileCode2 className="w-4 h-4 text-slate-500 flex-shrink-0" aria-hidden />
+                    <div className="flex-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => onViewFile(file, isMock)}
+                        className={clsx("block max-w-full text-left text-xs font-mono text-slate-200 hover:text-white truncate rounded", FOCUS_RING)}
+                        title={file.fileName}
+                      >
+                        {file.fileName}
+                      </button>
+                      <p className="text-[11px] text-slate-500 truncate tabular-nums mt-0.5" title={formatAbsoluteDate(file.modifiedAt)}>
+                        {formatBytes(file.sizeBytes)} · {formatRelativeDate(file.modifiedAt)}
+                      </p>
+                    </div>
+                    {/* Secondary actions stay quiet until the row is hovered/focused;
+                        Run keeps full contrast since it's the primary action. */}
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
+                      <div className="flex items-center gap-0.5 transition-opacity duration-150 [@media(hover:hover)]:opacity-60 group-hover:opacity-100 group-focus-within:opacity-100">
+                        <IconButton icon={Eye} label="View source" size="sm" onClick={() => onViewFile(file, isMock)} />
+                        {!isMock && (
+                          <IconButton icon={Share2} label="Share showcase link" size="sm" tone="accent" onClick={() => onShareFile(file)} />
+                        )}
+                        {!isMock && (
+                          <IconButton icon={Trash2} label={`Delete ${file.fileName}`} size="sm" tone="danger" onClick={() => onDeleteFile(file)} />
+                        )}
+                      </div>
+                      <IconButton
+                        icon={Play}
+                        label="Run in Test Generator"
+                        size="sm"
+                        tone="success"
+                        loading={running}
+                        onClick={() => onRunFile(file, isMock)}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// ─── Manual STD card ──────────────────────────────────────────────────────────
-
-interface ManualStdCardProps {
-  std: ManualStdRecord;
-  onView: (std: ManualStdRecord) => void;
-  onDownload: (std: ManualStdRecord) => void;
-  onDelete: (std: ManualStdRecord) => void;
-  isDownloading: boolean;
-}
-
-function ManualStdCard({ std, onView, onDownload, onDelete, isDownloading }: ManualStdCardProps) {
-  return (
-    <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50 transition-all">
-      <div className="flex flex-col sm:flex-row sm:items-start gap-3 p-4 sm:p-5 bg-surface-800/40">
-        <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-teal-500/20 border border-teal-500/30">
-            <ClipboardList className="w-5 h-5 text-teal-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <h3 className="text-sm sm:text-base font-bold text-slate-100 truncate max-w-[280px]" title={std.feature_name}>
-                {std.feature_name}
-              </h3>
-              {std.is_mock && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                  <FlaskConical className="w-2.5 h-2.5" aria-hidden />
-                  Sample
-                </span>
-              )}
-              {std.domain.split("+").map((d) => (
-                <span
-                  key={d}
-                  className={clsx(
-                    "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border",
-                    DOMAIN_STYLES[d] ?? DOMAIN_STYLES.general
-                  )}
-                >
-                  {DOMAIN_LABELS[d] ?? d}
-                </span>
-              ))}
-            </div>
-            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-1 sm:gap-3 mt-2 text-xs text-slate-500">
-              <span>{formatDate(std.created_at)}</span>
-              <span>{std.test_cases.length} test case{std.test_cases.length !== 1 ? "s" : ""}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0 w-full sm:w-auto">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => onDelete(std)}
-              title="Delete STD"
-              className="p-2 rounded-lg hover:bg-surface-600 text-slate-500 hover:text-red-400 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => onDownload(std)}
-              disabled={isDownloading}
-              title="Download PDF"
-              className="p-2 rounded-lg hover:bg-surface-600 text-slate-500 hover:text-slate-200 transition-colors disabled:opacity-50"
-            >
-              {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            </button>
-          </div>
-          <button
-            onClick={() => onView(std)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-surface-700/80 hover:bg-surface-700 transition-colors"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            View
-          </button>
-        </div>
-      </div>
-    </div>
+    </article>
   );
 }
 
@@ -334,16 +190,17 @@ export default function TestRepositoryTab() {
   const showMockData = !isLoading && !error && realFeatures.length === 0;
   const features: FeatureGroup[] = showMockData ? MOCK_FEATURES : realFeatures;
 
-  const filteredFeatures = features.filter(
-    (g) => !search.trim() || g.meta.featureName.toLowerCase().includes(search.toLowerCase())
-  );
-  const filteredStds = stds.filter(
-    (s) => !search.trim() || s.feature_name.toLowerCase().includes(search.toLowerCase())
-  );
+  const query = search.trim().toLowerCase();
+  const filteredFeatures = features.filter((g) => !query || g.meta.featureName.toLowerCase().includes(query));
+  const filteredStds = stds.filter((s) => !query || s.feature_name.toLowerCase().includes(query));
 
   const totalTests = features.reduce((acc, f) => acc + f.tests.length, 0);
   const activeLoading = view === "automation" ? isLoading : stdsLoading;
   const activeError = view === "automation" ? error : stdsError;
+  // Only the very first load shows skeletons — background refreshes (fired by
+  // cross-tab change events) keep the current list on screen instead of
+  // flashing it away.
+  const showSkeleton = activeLoading && (view === "automation" ? realFeatures.length === 0 : stds.length === 0);
 
   const handleRefresh = () => {
     if (view === "automation") refresh();
@@ -361,145 +218,149 @@ export default function TestRepositoryTab() {
     }
   };
 
-  const handleDeleteFile = (file: TestFileInfo) => {
+  const handleDeleteFile = async (file: TestFileInfo) => {
     if (!window.confirm(`Delete "${file.fileName}"?\nThis cannot be undone.`)) return;
-    deleteTest(file.featureSlug, file.fileName);
+    const ok = await deleteTest(file.featureSlug, file.fileName);
+    if (ok) toast.success(`Deleted ${file.fileName}`);
+    else toast.error(`Couldn't delete ${file.fileName}`, { description: "The file was restored. Try again." });
   };
 
-  const handleDeleteFeature = (slug: string) => {
+  const handleDeleteFeature = async (slug: string) => {
     const feature = features.find((f) => f.meta.slug === slug);
     const name = feature?.meta.featureName ?? slug;
     const count = feature?.tests.length ?? 0;
     if (!window.confirm(`Delete feature "${name}" and all ${count} test file(s)?\nThis cannot be undone.`)) return;
-    deleteFeature(slug);
+    const ok = await deleteFeature(slug);
+    if (ok) toast.success(`Deleted ${name}`, { description: `${count} test file${count !== 1 ? "s" : ""} removed` });
+    else toast.error(`Couldn't delete ${name}`, { description: "The feature was restored. Try again." });
   };
 
   const handleDownloadStd = async (std: ManualStdRecord) => {
     setDownloadingId(std.id);
     try {
       await exportStdToPdf(std.test_cases, std.coverage, std.feature_name, std.domain);
+    } catch {
+      toast.error("PDF export failed");
     } finally {
       setDownloadingId(null);
     }
   };
 
-  const handleDeleteStd = (std: ManualStdRecord) => {
+  const handleDeleteStd = async (std: ManualStdRecord) => {
     if (!window.confirm(`Delete STD "${std.feature_name}"?\nThis cannot be undone.`)) return;
-    deleteStd(std.id);
+    const ok = await deleteStd(std.id);
+    if (ok) toast.success(`Deleted ${std.feature_name}`);
+    else toast.error(`Couldn't delete ${std.feature_name}`, { description: "The STD was restored. Try again." });
   };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <TabToolbar className="flex-col items-stretch sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-1 bg-surface-900/80 rounded-lg p-1 border border-surface-600 overflow-x-auto flex-shrink-0">
-          {REPO_TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setView(t.id)}
-              className={clsx(
-                "px-3 py-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
-                view === t.id ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl<RepoView>
+          ariaLabel="Repository view"
+          fullWidth="mobile"
+          value={view}
+          onChange={setView}
+          options={[
+            { id: "automation", label: "Automation Suites", icon: Bot, count: realFeatures.length || undefined },
+            { id: "manual-std", label: "Manual STDs", icon: ClipboardList, count: stds.length || undefined },
+          ]}
+        />
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           {view === "automation" && features.length > 0 && (
-            <span className="text-xs text-slate-400 flex-shrink-0">{features.length} features · {totalTests} tests</span>
-          )}
-          {view === "manual-std" && stds.length > 0 && (
-            <span className="flex items-center gap-1 text-xs text-slate-400 flex-shrink-0">
-              <ClipboardList className="w-3.5 h-3.5" aria-hidden />{stds.length} STDs
+            <span className="hidden md:inline text-xs text-slate-500 tabular-nums flex-shrink-0">
+              {totalTests} test file{totalTests !== 1 ? "s" : ""}
             </span>
           )}
 
-          <div className="w-full sm:w-52 relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+          <div className="flex-1 min-w-0 sm:flex-none sm:w-56 relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" aria-hidden />
             <FormInput
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={view === "automation" ? "Search features…" : "Search STDs…"}
-              className="pl-8 py-2 text-xs w-full"
+              aria-label={view === "automation" ? "Search features" : "Search STDs"}
+              className="pl-8 sm:py-1.5 h-8 text-xs"
             />
           </div>
 
-          <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="flex-shrink-0">
-            <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} />
+          <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="flex-shrink-0" aria-label="Refresh">
+            <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} aria-hidden />
             <span className="hidden sm:inline">Refresh</span>
           </SecondaryButton>
         </div>
       </TabToolbar>
 
       <TabContent className="space-y-3">
-        {activeLoading && <LoadingState message={view === "automation" ? "Loading tests…" : "Loading saved STDs…"} />}
+        {showSkeleton && <SkeletonCardList label={view === "automation" ? "Loading tests" : "Loading saved STDs"} />}
         {!activeLoading && activeError && <ErrorBanner>{activeError}</ErrorBanner>}
 
-        {view === "automation" && !activeLoading && (
+        {view === "automation" && !showSkeleton && (
           <>
             {showMockData && (
               <DemoBanner>
-                <FlaskConical className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span><strong>Demo</strong> — sample files for preview. Generate real tests in the Generator tab.</span>
+                <FlaskConical className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
+                <span><strong className="font-semibold">Demo</strong> — sample files for preview. Generate real tests in the Generator tab.</span>
               </DemoBanner>
             )}
-            {filteredFeatures.length === 0 && (
+            {filteredFeatures.length === 0 && !activeLoading && (
               <EmptyState
-                icon={search.trim() ? Search : FileCode2}
+                icon={query ? Search : FileCode2}
                 accent="emerald"
-                title={search.trim() ? "No matches found" : "No saved tests yet"}
+                title={query ? "No matches found" : "No saved tests yet"}
                 description={
-                  search.trim()
+                  query
                     ? `Nothing matches "${search}". Try a different search term.`
                     : "Generate a Playwright test in the Test Generator tab — it will appear here automatically."
                 }
               />
             )}
-            <div key="automation" className="space-y-3 animate-fade-in">
-              {filteredFeatures.map((group) => (
-                <FeatureCard
-                  key={group.meta.slug}
-                  group={group}
-                  isMock={showMockData}
-                  runningPath={runningPath}
-                  onViewFile={(file, isMock) => setCodeViewFile({ file, isMock })}
-                  onRunFile={handleRunFile}
-                  onDeleteFile={handleDeleteFile}
-                  onDeleteFeature={handleDeleteFeature}
-                  onShareFile={setSharingFile}
-                />
+            <div key="automation" className="space-y-3">
+              {filteredFeatures.map((group, i) => (
+                <div key={group.meta.slug} className="animate-slide-up" style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}>
+                  <FeatureCard
+                    group={group}
+                    isMock={showMockData}
+                    runningPath={runningPath}
+                    onViewFile={(file, isMock) => setCodeViewFile({ file, isMock })}
+                    onRunFile={handleRunFile}
+                    onDeleteFile={handleDeleteFile}
+                    onDeleteFeature={handleDeleteFeature}
+                    onShareFile={setSharingFile}
+                  />
+                </div>
               ))}
             </div>
           </>
         )}
 
-        {view === "manual-std" && !activeLoading && (
+        {view === "manual-std" && !showSkeleton && (
           <>
-            {filteredStds.length === 0 && (
+            {filteredStds.length === 0 && !activeLoading && (
               <EmptyState
-                icon={search.trim() ? Search : ClipboardList}
+                icon={query ? Search : ClipboardList}
                 accent="emerald"
-                title={search.trim() ? "No matches found" : "No saved STDs yet"}
+                title={query ? "No matches found" : "No saved STDs yet"}
                 description={
-                  search.trim()
+                  query
                     ? `Nothing matches "${search}". Try a different search term.`
                     : "Generate a Manual STD in the Test Generator tab — it will appear here automatically."
                 }
               />
             )}
-            <div key="manual-std" className="space-y-3 animate-fade-in">
-              {filteredStds.map((std) => (
-                <ManualStdCard
-                  key={std.id}
-                  std={std}
-                  onView={setViewingStd}
-                  onDownload={handleDownloadStd}
-                  onDelete={handleDeleteStd}
-                  isDownloading={downloadingId === std.id}
-                />
+            <div key="manual-std" className="space-y-3">
+              {filteredStds.map((std, i) => (
+                <div key={std.id} className="animate-slide-up" style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}>
+                  <ManualStdCard
+                    std={std}
+                    onView={() => setViewingStd(std)}
+                    onDownload={() => void handleDownloadStd(std)}
+                    onDelete={() => void handleDeleteStd(std)}
+                    isDownloading={downloadingId === std.id}
+                  />
+                </div>
               ))}
             </div>
           </>
@@ -507,7 +368,7 @@ export default function TestRepositoryTab() {
       </TabContent>
 
       {codeViewFile && (
-        <CodeModal
+        <CodeViewerModal
           file={codeViewFile.file}
           isMock={codeViewFile.isMock}
           onClose={() => setCodeViewFile(null)}

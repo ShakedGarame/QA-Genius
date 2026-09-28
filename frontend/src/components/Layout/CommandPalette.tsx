@@ -45,7 +45,7 @@ export default function CommandPalette({ open, onClose, items }: CommandPaletteP
     if (open) {
       setQuery("");
       setActiveIndex(0);
-      // Focus after the modal's mount paints, so autofocus doesn't fight open animation.
+      // Focus after the modal's mount paints.
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
@@ -96,7 +96,9 @@ export default function CommandPalette({ open, onClose, items }: CommandPaletteP
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center pt-[12vh] p-4 bg-black/70 animate-fade-in"
+      // No open animation on purpose: ⌘K is a keyboard action used constantly,
+      // and any transition makes it feel slower than the keystroke.
+      className="fixed inset-0 z-[70] flex items-start justify-center pt-[12vh] p-4 bg-black/60"
       onClick={onClose}
     >
       <div

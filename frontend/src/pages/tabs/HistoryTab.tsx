@@ -1,138 +1,55 @@
 import { useEffect, useState } from "react";
 import {
-  FileCode2, Globe, FileText, ChevronDown, ChevronRight,
-  Loader2, Play, Eye, Trash2, RefreshCw, CalendarDays,
-  Layers, Search, FlaskConical, ClipboardList, Download,
-  BrainCircuit, AlertTriangle, Wrench, ScrollText, Share2,
+  FileCode2, Globe, FileText, ChevronRight,
+  Play, Eye, Trash2, RefreshCw, CalendarDays,
+  Layers, Search, FlaskConical, ClipboardList,
+  BrainCircuit, AlertTriangle, Wrench, ScrollText, Bot,
 } from "lucide-react";
 import clsx from "clsx";
+import { toast } from "sonner";
 import { useTestRepository } from "../../hooks/useTestRepository";
 import { useLogHistory } from "../../hooks/useLogHistory";
 import { useManualStds } from "../../hooks/useManualStds";
 import { FeatureGroup, LogAnalysisRecord, ManualStdRecord, TestFileInfo, TestRunStatus } from "../../types";
-import { MOCK_FEATURES, MOCK_CODE_MAP } from "../../data/mockData";
+import { MOCK_FEATURES } from "../../data/mockData";
 import { routeRunToRepository } from "../../lib/cloudRunner";
 import { exportStdToPdf } from "../../lib/exportStd";
 import ManualStdViewerModal from "../../components/qa-genius/ManualStdViewerModal";
 import ShowcaseModal from "../../components/qa-genius/ShowcaseModal";
+import CodeViewerModal from "../../components/qa-genius/CodeViewerModal";
+import ManualStdCard from "../../components/qa-genius/ManualStdCard";
+import { formatAbsoluteDate, formatRelativeDate } from "../../lib/formatDuration";
 import {
   TabToolbar,
   TabContent,
   EmptyState,
-  LoadingState,
+  SkeletonCardList,
   DemoBanner,
   ErrorBanner,
   SecondaryButton,
   FormInput,
+  SegmentedControl,
+  IconButton,
+  Badge,
+  CodeBlock,
+  CopyButton,
+  FOCUS_RING,
+  type BadgeTone,
 } from "../../components/ui/layout";
 
 type HistoryView = "automation" | "manual-std" | "logs";
 
-const HISTORY_TABS: { id: HistoryView; label: string }[] = [
-  { id: "automation", label: "🤖 Automation Runs" },
-  { id: "manual-std", label: "📋 Manual STDs" },
-  { id: "logs", label: "🔍 Log Analyses" },
-];
-
-const DOMAIN_LABELS: Record<string, string> = {
-  fintech: "FinTech-Adaptive",
-  auth: "Auth-Adaptive",
-  gaming: "Gaming-Adaptive",
-  general: "General",
-};
-
-const DOMAIN_STYLES: Record<string, string> = {
-  fintech: "bg-violet-500/10 text-violet-400 border-violet-500/30",
-  auth: "bg-blue-500/10 text-blue-400 border-blue-500/30",
-  gaming: "bg-pink-500/10 text-pink-400 border-pink-500/30",
-  general: "bg-slate-500/10 text-slate-400 border-slate-500/30",
-};
-
-function formatRelativeDate(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-function formatAbsoluteDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    year: "numeric", month: "short", day: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
-}
-
-const EXECUTION_STATUS_STYLES: Record<TestRunStatus, string> = {
-  PASSED: "bg-green-500/10 text-green-400 border-green-500/20",
-  FAILED: "bg-red-500/10 text-red-400 border-red-500/20",
-  RUNNING: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20 animate-pulse",
+const EXECUTION_STATUS: Record<TestRunStatus, { tone: BadgeTone; label: string }> = {
+  PASSED: { tone: "success", label: "Passed" },
+  FAILED: { tone: "danger", label: "Failed" },
+  RUNNING: { tone: "warning", label: "Running" },
 };
 
 function ExecutionStatusBadge({ status }: { status?: TestRunStatus | null }) {
-  if (!status) {
-    return (
-      <span className="rounded-full px-2 py-0.5 text-xs font-medium border bg-slate-500/10 text-slate-400 border-slate-500/20">
-        NO RUNS
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className={clsx(
-        "rounded-full px-2 py-0.5 text-xs font-medium border uppercase",
-        EXECUTION_STATUS_STYLES[status]
-      )}
-    >
-      {status}
-    </span>
-  );
+  if (!status) return <Badge tone="neutral">No runs</Badge>;
+  const { tone, label } = EXECUTION_STATUS[status];
+  return <Badge tone={tone} dot>{label}</Badge>;
 }
-
-// ─── Code view modal ──────────────────────────────────────────────────────────
-
-function CodeModal({ file, onClose, isMockEntry = false }: { file: TestFileInfo; onClose: () => void; isMockEntry?: boolean }) {
-  const [code, setCode] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Mock entries are served from in-memory data — no API call needed
-    if (isMockEntry) {
-      setCode(MOCK_CODE_MAP[file.relativePath] ?? "// Sample code not found");
-      return;
-    }
-    fetch(`/api/tests/${encodeURIComponent(file.featureSlug)}/${encodeURIComponent(file.fileName)}`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((d) => setCode(d.code))
-      .catch(() => setCode("// Failed to load"));
-  }, [file, isMockEntry]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-      <div className="w-full max-w-3xl h-[80vh] bg-surface-800 border border-surface-600 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-600 bg-surface-700">
-          <div className="flex items-center gap-2">
-            <FileCode2 className="w-4 h-4 text-slate-400" />
-            <span className="text-sm font-mono text-slate-200">{file.relativePath}</span>
-          </div>
-          <button onClick={onClose} className="px-3 py-1 text-xs text-slate-400 hover:text-white bg-surface-600 hover:bg-surface-500 rounded transition-colors">
-            Close
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto p-5">
-          {code === null
-            ? <div className="flex items-center justify-center h-full text-slate-500"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
-            : <pre className="text-xs font-mono text-slate-300 leading-5 whitespace-pre-wrap">{code}</pre>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 
 // ─── Feature History Card ─────────────────────────────────────────────────────
 
@@ -146,102 +63,75 @@ interface FeatureCardProps {
 function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false }: FeatureCardProps) {
   const [expanded, setExpanded] = useState(false);
   const { meta, tests } = group;
+  const isApi = meta.inputType === "swagger";
+  const panelId = `history-files-${meta.slug}`;
+  const primaryDate = meta.lastRunAt ?? meta.createdAt;
 
   return (
-    <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50 transition-all">
-      {/* Card header */}
-      <div className="flex flex-col sm:flex-row sm:items-start gap-3 p-4 sm:p-5 bg-surface-800/40">
-        {/* Type icon + info */}
+    <article className="rounded-xl border border-surface-700 overflow-hidden bg-surface-800/50 transition-colors hover:border-surface-600">
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 p-4 sm:p-5">
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <div className={clsx(
-            "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-            meta.inputType === "swagger"
-              ? "bg-violet-500/20 border border-violet-500/30"
-              : "bg-sky-500/20 border border-sky-500/30"
+            "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border",
+            isApi ? "bg-violet-500/10 border-violet-500/20" : "bg-sky-500/10 border-sky-500/20"
           )}>
-            {meta.inputType === "swagger"
-              ? <Globe className="w-5 h-5 text-violet-400" />
-              : <FileText className="w-5 h-5 text-sky-400" />}
+            {isApi
+              ? <Globe className="w-5 h-5 text-violet-400" aria-hidden />
+              : <FileText className="w-5 h-5 text-sky-400" aria-hidden />}
           </div>
 
           <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <h3 className="text-sm sm:text-base font-bold text-slate-100">{meta.featureName}</h3>
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border bg-violet-500/15 text-violet-400 border-violet-500/20">
-                Playwright
-              </span>
-              {isMock && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                  <FlaskConical className="w-2.5 h-2.5" aria-hidden />
-                  Sample
-                </span>
-              )}
-              <span className={clsx(
-                "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border",
-                meta.inputType === "swagger"
-                  ? "bg-violet-500/15 text-violet-400 border-violet-500/20"
-                  : "bg-sky-500/15 text-sky-400 border-sky-500/20"
-              )}>
-                {meta.inputType === "swagger" ? "API" : "UI"}
-              </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <h3 className="text-sm font-semibold text-slate-100 mr-0.5 truncate max-w-full">{meta.featureName}</h3>
               <ExecutionStatusBadge status={meta.latestRunStatus} />
+              <Badge tone={isApi ? "accent" : "info"}>{isApi ? "API" : "UI"}</Badge>
+              <Badge tone="neutral">Playwright</Badge>
+              {isMock && <Badge tone="warning" icon={FlaskConical}>Sample</Badge>}
             </div>
 
             {meta.description && (
-              <p className="text-xs text-slate-500 mt-1 line-clamp-2">{meta.description}</p>
+              <p className="text-xs text-slate-400 mt-1.5 line-clamp-2 leading-relaxed">{meta.description}</p>
             )}
 
-            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-1 sm:gap-3 mt-2">
-              <span className="flex items-center gap-1 text-xs text-slate-500">
-                <CalendarDays className="w-3 h-3 flex-shrink-0" />
-                {meta.lastRunAt ? `Last run ${formatRelativeDate(meta.lastRunAt)}` : formatRelativeDate(meta.createdAt)}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-slate-500">
+              <span className="inline-flex items-center gap-1.5" title={formatAbsoluteDate(primaryDate)}>
+                <CalendarDays className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
+                {meta.lastRunAt ? `Last run ${formatRelativeDate(meta.lastRunAt)}` : `Created ${formatRelativeDate(meta.createdAt)}`}
               </span>
-              <span className="hidden sm:inline text-slate-600 text-[10px]">
-                {formatAbsoluteDate(meta.lastRunAt ?? meta.createdAt)}
-              </span>
-              {meta.lastRunAt && (
-                <span className="text-slate-600 text-[10px]">Created {formatRelativeDate(meta.createdAt)}</span>
-              )}
-              <span className="flex items-center gap-1 text-xs text-slate-500">
-                <Layers className="w-3 h-3 flex-shrink-0" />
+              <span className="inline-flex items-center gap-1.5 tabular-nums">
+                <Layers className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
                 {tests.length} file{tests.length !== 1 ? "s" : ""}
               </span>
             </div>
 
             {meta.prdText && (
-              <p className="text-[11px] text-slate-600 mt-2 font-mono bg-surface-700/50 px-2 py-1 rounded line-clamp-2">
-                &ldquo;{meta.prdText}&rdquo;
+              <p className="text-[11px] text-slate-500 mt-2.5 pl-2.5 border-l-2 border-surface-600 line-clamp-2 leading-relaxed">
+                {meta.prdText}
               </p>
             )}
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0 w-full sm:w-auto">
-          <button
-            onClick={() => !isMock && onDeleteFeature(meta.slug)}
+        <div className="flex items-center justify-end gap-1 flex-shrink-0">
+          <IconButton
+            icon={Trash2}
+            label={isMock ? "Sample data cannot be deleted" : `Delete feature ${meta.featureName}`}
+            tone="danger"
             disabled={isMock}
-            title={isMock ? "Sample data cannot be deleted" : "Delete feature"}
-            className={clsx(
-              "p-2 rounded-lg transition-colors",
-              isMock ? "text-slate-700 cursor-not-allowed" : "hover:bg-surface-600 text-slate-500 hover:text-red-400"
-            )}
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-surface-700/80 hover:bg-surface-700 transition-colors"
-          >
-            {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-            {expanded ? "Collapse" : "View Tests"}
-          </button>
+            onClick={() => onDeleteFeature(meta.slug)}
+          />
+          <SecondaryButton onClick={() => setExpanded((v) => !v)} aria-expanded={expanded} aria-controls={panelId}>
+            <ChevronRight
+              className={clsx("w-3.5 h-3.5 transition-transform duration-200 ease-out", expanded && "rotate-90")}
+              aria-hidden
+            />
+            {expanded ? "Hide tests" : "View tests"}
+          </SecondaryButton>
         </div>
       </div>
 
-      {/* Expanded test list */}
       {expanded && (
-        <div className="border-t border-surface-600 bg-surface-900/60 p-4 space-y-2 animate-fade-in">
+        <div id={panelId} className="border-t border-surface-700 bg-surface-900/40 p-2 animate-fade-in">
           {tests.length === 0 ? (
             <EmptyState
               icon={FileCode2}
@@ -251,140 +141,29 @@ function FeatureHistoryCard({ group, onViewCode, onDeleteFeature, isMock = false
               compact
             />
           ) : (
-            tests.map((file) => (
-              <div
-                key={file.relativePath}
-                className="rounded-lg border border-surface-600 bg-surface-800 p-3"
-              >
-                <div className="flex items-center gap-2">
-                  <FileCode2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                  <span className="text-xs font-mono text-slate-200 flex-1 truncate">{file.fileName}</span>
-
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button
-                      onClick={() => onViewCode(file, isMock)}
-                      title="View source code"
-                      className="p-1 rounded hover:bg-surface-600 text-slate-500 hover:text-slate-200 transition-colors"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                    {!isMock && (
-                      <button
-                        onClick={() => routeRunToRepository(file)}
-                        title="Run in Test Repository"
-                        className="flex items-center gap-1 px-2 py-1 bg-emerald-600/80 hover:bg-emerald-600 text-white rounded text-[10px] font-medium transition-colors"
-                      >
-                        <Play className="w-2.5 h-2.5 fill-white" />
-                        Run
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
+            <ul className="space-y-0.5">
+              {tests.map((file) => (
+                <li key={file.relativePath} className="flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-lg transition-colors hover:bg-surface-800/80">
+                  <FileCode2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" aria-hidden />
+                  <button
+                    type="button"
+                    onClick={() => onViewCode(file, isMock)}
+                    className={clsx("flex-1 min-w-0 text-left text-xs font-mono text-slate-200 hover:text-white truncate rounded", FOCUS_RING)}
+                    title={file.fileName}
+                  >
+                    {file.fileName}
+                  </button>
+                  <IconButton icon={Eye} label="View source" size="sm" onClick={() => onViewCode(file, isMock)} />
+                  {!isMock && (
+                    <IconButton icon={Play} label="Run in Test Repository" size="sm" tone="success" onClick={() => routeRunToRepository(file)} />
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// ─── Manual STD History Card ──────────────────────────────────────────────────
-
-interface ManualStdHistoryCardProps {
-  std: ManualStdRecord;
-  onView: () => void;
-  onDownload: () => void;
-  onDelete: () => void;
-  onShare: () => void;
-  isDownloading: boolean;
-}
-
-function ManualStdHistoryCard({ std, onView, onDownload, onDelete, onShare, isDownloading }: ManualStdHistoryCardProps) {
-  return (
-    <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50 transition-all">
-      <div className="flex flex-col sm:flex-row sm:items-start gap-3 p-4 sm:p-5 bg-surface-800/40">
-        <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-teal-500/20 border border-teal-500/30">
-            <ClipboardList className="w-5 h-5 text-teal-400" />
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <h3 className="text-sm sm:text-base font-bold text-slate-100">{std.feature_name}</h3>
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border bg-teal-500/15 text-teal-400 border-teal-500/20">
-                Manual STD
-              </span>
-              {std.is_mock && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                  <FlaskConical className="w-2.5 h-2.5" aria-hidden />
-                  Sample
-                </span>
-              )}
-              {std.domain.split("+").map((d) => (
-                <span
-                  key={d}
-                  className={clsx(
-                    "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border",
-                    DOMAIN_STYLES[d] ?? DOMAIN_STYLES.general
-                  )}
-                >
-                  {DOMAIN_LABELS[d] ?? d}
-                </span>
-              ))}
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-1 sm:gap-3 mt-2">
-              <span className="flex items-center gap-1 text-xs text-slate-500">
-                <CalendarDays className="w-3 h-3 flex-shrink-0" />
-                {formatRelativeDate(std.created_at)}
-              </span>
-              <span className="hidden sm:inline text-slate-600 text-[10px]">
-                {formatAbsoluteDate(std.created_at)}
-              </span>
-              <span className="flex items-center gap-1 text-xs text-slate-500">
-                <Layers className="w-3 h-3 flex-shrink-0" />
-                {std.test_cases.length} test case{std.test_cases.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0 w-full sm:w-auto">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={onDelete}
-              title="Delete STD"
-              className="p-2 rounded-lg hover:bg-surface-600 text-slate-500 hover:text-red-400 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onDownload}
-              disabled={isDownloading}
-              title="Download PDF"
-              className="p-2 rounded-lg hover:bg-surface-600 text-slate-500 hover:text-slate-200 transition-colors disabled:opacity-50"
-            >
-              {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={onShare}
-              title="Share Showcase Link"
-              className="p-2 rounded-lg hover:bg-surface-600 text-slate-500 hover:text-sky-400 transition-colors"
-            >
-              <Share2 className="w-4 h-4" />
-            </button>
-          </div>
-          <button
-            onClick={onView}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-surface-700/80 hover:bg-surface-700 transition-colors"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            View
-          </button>
-        </div>
-      </div>
-    </div>
+    </article>
   );
 }
 
@@ -403,107 +182,109 @@ function formatSourceLabel(source: string): string {
   return SOURCE_LABELS[source.toLowerCase()] ?? source.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "text-red-300 bg-red-500/15 border-red-500/30",
-  high: "text-orange-300 bg-orange-500/15 border-orange-500/30",
-  medium: "text-yellow-300 bg-yellow-500/15 border-yellow-500/30",
-  low: "text-blue-300 bg-blue-500/15 border-blue-500/30",
-  unknown: "text-slate-400 bg-slate-500/15 border-slate-500/30",
+const SEVERITY_TONES: Record<string, BadgeTone> = {
+  critical: "danger",
+  high: "orange",
+  medium: "warning",
+  low: "info",
+  unknown: "neutral",
 };
+
+function DetailSection({
+  icon: Icon,
+  title,
+  iconClassName,
+  copyText,
+  children,
+}: {
+  icon: typeof AlertTriangle;
+  title: string;
+  iconClassName: string;
+  copyText?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <Icon className={clsx("w-3.5 h-3.5", iconClassName)} aria-hidden /> {title}
+        </p>
+        {copyText && <CopyButton text={copyText} label={`Copy ${title.toLowerCase()}`} />}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 function LogAnalysisCard({
   analysis,
   onDelete,
 }: {
   analysis: LogAnalysisRecord;
-  onDelete: (id: string) => void;
+  onDelete: (analysis: LogAnalysisRecord) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const severityClass = SEVERITY_COLORS[analysis.severity.toLowerCase()] ?? SEVERITY_COLORS.unknown;
+  const severityTone = SEVERITY_TONES[analysis.severity.toLowerCase()] ?? "neutral";
+  const panelId = `log-analysis-${analysis.id}`;
+  const truncatedLogs = analysis.raw_logs.length > 4000;
 
   return (
-    <div className="rounded-xl border border-surface-600 overflow-hidden bg-surface-800/50">
-      <div className="flex items-start gap-4 p-5 bg-surface-800/40">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-violet-500/20 border border-violet-500/30">
-          <BrainCircuit className="w-5 h-5 text-violet-400" />
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-base font-bold text-slate-100">
-              {analysis.feature_name?.trim() || "Unnamed Test Automation Run"}
-            </h3>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/20">
-              Log Analysis
-            </span>
-            <span className={clsx("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border", severityClass)}>
-              {analysis.severity}
-            </span>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-surface-700 text-slate-400 border border-surface-600">
-              {analysis.category}
-            </span>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-violet-500/15 text-violet-400 border border-violet-500/20">
-              {formatSourceLabel(analysis.source)}
-            </span>
+    <article className="rounded-xl border border-surface-700 overflow-hidden bg-surface-800/50 transition-colors hover:border-surface-600">
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 p-4 sm:p-5">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-violet-500/10 border border-violet-500/20">
+            <BrainCircuit className="w-5 h-5 text-violet-400" aria-hidden />
           </div>
-          <p className="text-sm text-slate-300 mt-1 line-clamp-2">{analysis.root_cause}</p>
-          <div className="flex items-center gap-1 text-xs text-slate-500 mt-2">
-            <CalendarDays className="w-3 h-3" />
-            {formatRelativeDate(analysis.created_at)}
-            <span className="text-slate-600 text-[10px] ml-1">{formatAbsoluteDate(analysis.created_at)}</span>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h3 className="text-sm font-semibold text-slate-100 mr-0.5 truncate max-w-full">
+                {analysis.feature_name?.trim() || "Unnamed Test Automation Run"}
+              </h3>
+              <Badge tone={severityTone} dot>{analysis.severity}</Badge>
+              <Badge tone="accent">{formatSourceLabel(analysis.source)}</Badge>
+              <Badge tone="neutral" className="normal-case font-mono tracking-normal">{analysis.category}</Badge>
+            </div>
+            <p className="text-sm text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">{analysis.root_cause}</p>
+            <p className="inline-flex items-center gap-1.5 text-xs text-slate-500 mt-2" title={formatAbsoluteDate(analysis.created_at)}>
+              <CalendarDays className="w-3.5 h-3.5" aria-hidden />
+              {formatRelativeDate(analysis.created_at)}
+            </p>
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <button
-            onClick={() => {
-              if (!window.confirm("Delete this log analysis?")) return;
-              onDelete(analysis.id);
-            }}
-            className="p-1 rounded hover:bg-surface-600 text-slate-600 hover:text-red-400 transition-colors"
-            title="Delete analysis"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-          >
-            {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-            {expanded ? "Collapse" : "Details"}
-          </button>
+        <div className="flex items-center justify-end gap-1 flex-shrink-0">
+          <IconButton icon={Trash2} label="Delete analysis" tone="danger" onClick={() => onDelete(analysis)} />
+          <SecondaryButton onClick={() => setExpanded((v) => !v)} aria-expanded={expanded} aria-controls={panelId}>
+            <ChevronRight
+              className={clsx("w-3.5 h-3.5 transition-transform duration-200 ease-out", expanded && "rotate-90")}
+              aria-hidden
+            />
+            {expanded ? "Hide details" : "Details"}
+          </SecondaryButton>
         </div>
       </div>
 
       {expanded && (
-        <div className="border-t border-surface-600 bg-surface-900/60 p-5 space-y-4 animate-fade-in">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 mb-1 flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5" /> Root Cause
-            </p>
-            <p className="text-sm text-slate-200">{analysis.root_cause}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-slate-400 mb-1 flex items-center gap-1">
-              <ScrollText className="w-3.5 h-3.5" /> Explanation
-            </p>
-            <p className="text-sm text-slate-300 whitespace-pre-wrap">{analysis.explanation}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-slate-400 mb-1 flex items-center gap-1">
-              <Wrench className="w-3.5 h-3.5" /> Suggested Fix
-            </p>
-            <p className="text-sm text-emerald-300/90 whitespace-pre-wrap">{analysis.suggested_fix}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-slate-400 mb-1">Original Logs</p>
-            <pre className="text-[11px] font-mono text-slate-500 bg-surface-900 rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap">
-              {analysis.raw_logs.slice(0, 1500)}{analysis.raw_logs.length > 1500 ? "\n…" : ""}
-            </pre>
-          </div>
+        <div id={panelId} className="border-t border-surface-700 bg-surface-900/40 p-4 sm:p-5 space-y-5 animate-fade-in">
+          <DetailSection icon={AlertTriangle} iconClassName="text-orange-400" title="Root Cause" copyText={analysis.root_cause}>
+            <p className="text-sm text-slate-100 leading-relaxed">{analysis.root_cause}</p>
+          </DetailSection>
+          <DetailSection icon={ScrollText} iconClassName="text-sky-400" title="Explanation" copyText={analysis.explanation}>
+            <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{analysis.explanation}</p>
+          </DetailSection>
+          <DetailSection icon={Wrench} iconClassName="text-emerald-400" title="Suggested Fix">
+            <CodeBlock code={analysis.suggested_fix} label="Suggested fix" maxHeight="max-h-72" />
+          </DetailSection>
+          <DetailSection icon={FileCode2} iconClassName="text-slate-500" title="Original Logs">
+            <CodeBlock
+              code={truncatedLogs ? `${analysis.raw_logs.slice(0, 4000)}\n…` : analysis.raw_logs}
+              label={truncatedLogs ? "Logs (first 4,000 chars)" : "Logs"}
+            />
+          </DetailSection>
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -550,51 +331,65 @@ export default function HistoryTab() {
     setDownloadingId(std.id);
     try {
       await exportStdToPdf(std.test_cases, std.coverage, std.feature_name, std.domain);
+    } catch {
+      toast.error("PDF export failed");
     } finally {
       setDownloadingId(null);
     }
   };
 
-  const handleDeleteStd = (std: ManualStdRecord) => {
+  const handleDeleteStd = async (std: ManualStdRecord) => {
     if (!window.confirm(`Delete STD "${std.feature_name}"?\nThis cannot be undone.`)) return;
-    deleteStd(std.id);
+    const ok = await deleteStd(std.id);
+    if (ok) toast.success(`Deleted ${std.feature_name}`);
+    else toast.error(`Couldn't delete ${std.feature_name}`, { description: "The STD was restored. Try again." });
+  };
+
+  const handleDeleteFeature = async (group: FeatureGroup) => {
+    const name = group.meta.featureName;
+    const count = group.tests.length;
+    if (!window.confirm(`Delete feature "${name}" and all ${count} test file(s)?\nThis cannot be undone.`)) return;
+    const ok = await deleteFeature(group.meta.slug);
+    if (ok) toast.success(`Deleted ${name}`, { description: `${count} test file${count !== 1 ? "s" : ""} removed` });
+    else toast.error(`Couldn't delete ${name}`, { description: "The feature was restored. Try again." });
+  };
+
+  const handleDeleteAnalysis = async (analysis: LogAnalysisRecord) => {
+    if (!window.confirm("Delete this log analysis?")) return;
+    const ok = await deleteAnalysis(analysis.id);
+    if (ok) toast.success("Log analysis deleted");
+    else toast.error("Couldn't delete the analysis", { description: "It was restored. Try again." });
   };
 
   const showMockData = !isLoading && !error && realFeatures.length === 0;
   const features: FeatureGroup[] = showMockData ? MOCK_FEATURES : realFeatures;
 
+  const query = search.trim().toLowerCase();
   const filtered = features.filter(
     (g) =>
-      !search.trim() ||
-      g.meta.featureName.toLowerCase().includes(search.toLowerCase()) ||
-      g.meta.description?.toLowerCase().includes(search.toLowerCase())
+      !query ||
+      g.meta.featureName.toLowerCase().includes(query) ||
+      g.meta.description?.toLowerCase().includes(query)
   );
 
   const filteredLogs = analyses.filter(
     (a) =>
-      !search.trim() ||
-      a.feature_name?.toLowerCase().includes(search.toLowerCase()) ||
-      a.source.toLowerCase().includes(search.toLowerCase()) ||
-      a.root_cause.toLowerCase().includes(search.toLowerCase()) ||
-      a.category.toLowerCase().includes(search.toLowerCase())
+      !query ||
+      a.feature_name?.toLowerCase().includes(query) ||
+      a.source.toLowerCase().includes(query) ||
+      a.root_cause.toLowerCase().includes(query) ||
+      a.category.toLowerCase().includes(query)
   );
 
-  const filteredStds = stds.filter(
-    (s) => !search.trim() || s.feature_name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredStds = stds.filter((s) => !query || s.feature_name.toLowerCase().includes(query));
 
-  const automationEmptyCopy = search.trim()
-    ? { title: "No matches found", description: `Nothing matches "${search}". Try a different search term.` }
-    : { title: "No Automation runs yet", description: "Generate and run Playwright tests in the Test Generator tab to see them here." };
+  const noMatchCopy = { title: "No matches found", description: `Nothing matches "${search}". Try a different search term.` };
 
-  const manualStdEmptyCopy = search.trim()
-    ? { title: "No matches found", description: `Nothing matches "${search}". Try a different search term.` }
-    : { title: "No Manual STDs yet", description: "Generate a Manual STD in the Test Generator tab — it will appear here automatically." };
-
-  const totalTests = features.reduce((acc, g) => acc + g.tests.length, 0);
-  const totalFeatures = features.length;
   const activeLoading = view === "automation" ? isLoading : view === "manual-std" ? stdsLoading : logsLoading;
   const activeError = view === "automation" ? error : view === "manual-std" ? stdsError : logsError;
+  const activeCount = view === "automation" ? realFeatures.length : view === "manual-std" ? stds.length : analyses.length;
+  // Skeletons only on the first load; background refreshes keep the list visible.
+  const showSkeleton = activeLoading && activeCount === 0;
 
   const handleRefresh = () => {
     if (view === "automation") refresh();
@@ -602,46 +397,28 @@ export default function HistoryTab() {
     else refreshLogs();
   };
 
+  const staggerStyle = (i: number) => ({ animationDelay: `${Math.min(i, 6) * 30}ms` });
+
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       <TabToolbar className="flex-col items-stretch sm:flex-row sm:items-center sm:justify-between">
-        {/* Left: 3 primary tabs */}
-        <div className="flex items-center gap-1 bg-surface-900/80 rounded-lg p-1 border border-surface-600 overflow-x-auto flex-shrink-0">
-          {HISTORY_TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setView(t.id)}
-              className={clsx(
-                "px-3 py-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
-                view === t.id ? "bg-surface-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl<HistoryView>
+          ariaLabel="History view"
+          fullWidth="mobile"
+          value={view}
+          onChange={setView}
+          options={[
+            { id: "automation", label: "Automation Runs", icon: Bot, count: realFeatures.length || undefined },
+            { id: "manual-std", label: "Manual STDs", icon: ClipboardList, count: stds.length || undefined },
+            { id: "logs", label: "Log Analyses", icon: BrainCircuit, count: analyses.length || undefined },
+          ]}
+        />
 
-        {/* Right: stats badge + search + refresh */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          {view === "automation" && totalFeatures > 0 && (
-            <div className="flex items-center gap-x-3 text-xs text-slate-400 flex-shrink-0">
-              <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5" aria-hidden />{totalFeatures} features</span>
-              <span className="flex items-center gap-1"><FileCode2 className="w-3.5 h-3.5" aria-hidden />{totalTests} files</span>
-            </div>
-          )}
-          {view === "manual-std" && stds.length > 0 && (
-            <span className="flex items-center gap-1 text-xs text-slate-400 flex-shrink-0">
-              <ClipboardList className="w-3.5 h-3.5" aria-hidden />{stds.length} STDs
-            </span>
-          )}
-          {view === "logs" && analyses.length > 0 && (
-            <span className="text-xs text-slate-400 flex-shrink-0">{analyses.length} saved analyses</span>
-          )}
-
-          <div className="w-full sm:w-52 relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex-1 min-w-0 sm:flex-none sm:w-56 relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" aria-hidden />
             <FormInput
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={
@@ -649,108 +426,104 @@ export default function HistoryTab() {
                 view === "manual-std" ? "Search STDs…" :
                 "Search log analyses…"
               }
-              className="pl-8 py-2 text-xs w-full"
+              aria-label="Search history"
+              className="pl-8 sm:py-1.5 h-8 text-xs"
             />
           </div>
 
-          <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="flex-shrink-0">
-            <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} />
+          <SecondaryButton onClick={handleRefresh} disabled={activeLoading} className="flex-shrink-0" aria-label="Refresh">
+            <RefreshCw className={clsx("w-3.5 h-3.5", activeLoading && "animate-spin")} aria-hidden />
             <span className="hidden sm:inline">Refresh</span>
           </SecondaryButton>
         </div>
       </TabToolbar>
 
-      <TabContent className="space-y-4">
-        {activeLoading && <LoadingState message="Loading history…" />}
+      <TabContent className="space-y-3">
+        {showSkeleton && <SkeletonCardList label="Loading history" />}
 
         {!activeLoading && activeError && <ErrorBanner>{activeError}</ErrorBanner>}
 
-        {view === "automation" && !activeLoading && (
+        {view === "automation" && !showSkeleton && (
           <>
             {showMockData && (
               <DemoBanner>
                 <FlaskConical className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
                 <span>
-                  <strong>Demo Mode</strong> — sample features to showcase the UI.
-                  Generate your first real test in the <strong>Test Generator</strong> tab to replace them.
+                  <strong className="font-semibold">Demo Mode</strong> — sample features to showcase the UI.
+                  Generate your first real test in the <strong className="font-semibold">Test Generator</strong> tab to replace them.
                 </span>
               </DemoBanner>
             )}
 
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !activeLoading && (
               <EmptyState
-                icon={search.trim() ? Search : FileCode2}
+                icon={query ? Search : FileCode2}
                 accent="slate"
-                title={automationEmptyCopy.title}
-                description={automationEmptyCopy.description}
+                title={query ? noMatchCopy.title : "No Automation runs yet"}
+                description={query ? noMatchCopy.description : "Generate and run Playwright tests in the Test Generator tab to see them here."}
               />
             )}
 
-            <div key="automation" className="space-y-4 animate-fade-in">
-              {filtered.map((group) => (
-                <FeatureHistoryCard
-                  key={group.meta.slug}
-                  group={group}
-                  isMock={showMockData}
-                  onViewCode={(file, isMock) => setCodeViewFile({ file, isMock })}
-                  onDeleteFeature={(slug) => {
-                    const name = group.meta.featureName;
-                    const count = group.tests.length;
-                    if (!window.confirm(`Delete feature "${name}" and all ${count} test file(s)?\nThis cannot be undone.`)) return;
-                    deleteFeature(slug);
-                  }}
-                />
+            <div key="automation" className="space-y-3">
+              {filtered.map((group, i) => (
+                <div key={group.meta.slug} className="animate-slide-up" style={staggerStyle(i)}>
+                  <FeatureHistoryCard
+                    group={group}
+                    isMock={showMockData}
+                    onViewCode={(file, isMock) => setCodeViewFile({ file, isMock })}
+                    onDeleteFeature={() => void handleDeleteFeature(group)}
+                  />
+                </div>
               ))}
             </div>
           </>
         )}
 
-        {view === "manual-std" && !activeLoading && (
+        {view === "manual-std" && !showSkeleton && (
           <>
-            {filteredStds.length === 0 && (
+            {filteredStds.length === 0 && !activeLoading && (
               <EmptyState
-                icon={search.trim() ? Search : ClipboardList}
+                icon={query ? Search : ClipboardList}
                 accent="slate"
-                title={manualStdEmptyCopy.title}
-                description={manualStdEmptyCopy.description}
+                title={query ? noMatchCopy.title : "No Manual STDs yet"}
+                description={query ? noMatchCopy.description : "Generate a Manual STD in the Test Generator tab — it will appear here automatically."}
               />
             )}
 
-            <div key="manual-std" className="space-y-4 animate-fade-in">
-              {filteredStds.map((std) => (
-                <ManualStdHistoryCard
-                  key={std.id}
-                  std={std}
-                  onView={() => setViewingStd(std)}
-                  onDownload={() => handleDownloadStd(std)}
-                  onDelete={() => handleDeleteStd(std)}
-                  onShare={() => setSharingStd(std)}
-                  isDownloading={downloadingId === std.id}
-                />
+            <div key="manual-std" className="space-y-3">
+              {filteredStds.map((std, i) => (
+                <div key={std.id} className="animate-slide-up" style={staggerStyle(i)}>
+                  <ManualStdCard
+                    std={std}
+                    onView={() => setViewingStd(std)}
+                    onDownload={() => void handleDownloadStd(std)}
+                    onDelete={() => void handleDeleteStd(std)}
+                    onShare={() => setSharingStd(std)}
+                    isDownloading={downloadingId === std.id}
+                  />
+                </div>
               ))}
             </div>
           </>
         )}
 
-        {view === "logs" && !activeLoading && (
+        {view === "logs" && !showSkeleton && (
           <>
-            {filteredLogs.length === 0 && !logsError && (
+            {filteredLogs.length === 0 && !logsError && !activeLoading && (
               <EmptyState
-                icon={BrainCircuit}
-                accent="violet"
-                title="No log analyses saved yet"
-                description="Run an analysis in the Log Analyzer tab — results are saved here automatically for future reference."
-                hint="Supports Playwright, Coralogix, Node.js, Jest, and Docker logs."
+                icon={query ? Search : BrainCircuit}
+                accent={query ? "slate" : "violet"}
+                title={query ? noMatchCopy.title : "No log analyses saved yet"}
+                description={query ? noMatchCopy.description : "Run an analysis in the Log Analyzer tab — results are saved here automatically for future reference."}
+                hint={query ? undefined : "Supports Playwright, Coralogix, Node.js, Jest, and Docker logs."}
               />
             )}
 
-            <div key="logs" className="space-y-4 animate-fade-in">
-              {filteredLogs.map((analysis) => (
-                <LogAnalysisCard
-                  key={analysis.id}
-                  analysis={analysis}
-                  onDelete={deleteAnalysis}
-                />
+            <div key="logs" className="space-y-3">
+              {filteredLogs.map((analysis, i) => (
+                <div key={analysis.id} className="animate-slide-up" style={staggerStyle(i)}>
+                  <LogAnalysisCard analysis={analysis} onDelete={(a) => void handleDeleteAnalysis(a)} />
+                </div>
               ))}
             </div>
           </>
@@ -758,9 +531,9 @@ export default function HistoryTab() {
       </TabContent>
 
       {codeViewFile && (
-        <CodeModal
+        <CodeViewerModal
           file={codeViewFile.file}
-          isMockEntry={codeViewFile.isMock}
+          isMock={codeViewFile.isMock}
           onClose={() => setCodeViewFile(null)}
         />
       )}

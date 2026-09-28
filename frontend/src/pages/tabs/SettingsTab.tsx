@@ -36,7 +36,17 @@ import {
   syncGitHubTokenToStorage,
   isRealGitHubToken,
 } from "../../lib/githubToken";
-import { TabContent, LoadingState } from "../../components/ui/layout";
+import { toast } from "sonner";
+import {
+  TabContent,
+  Skeleton,
+  Badge,
+  FormInput,
+  SelectInput,
+  SecondaryButton,
+  ErrorBanner,
+  FOCUS_RING,
+} from "../../components/ui/layout";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,17 +78,26 @@ function StatusBadge({
   activeLabel: string;
   inactiveLabel: string;
 }) {
-  return active ? (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
-      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden />
-      {activeLabel}
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25">
-      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" aria-hidden />
-      {inactiveLabel}
-    </span>
+  // Static dot — a status that never changes on screen shouldn't pulse forever.
+  return (
+    <Badge tone={active ? "success" : "warning"} dot className="normal-case tracking-normal text-[11px] px-2 py-1">
+      {active ? activeLabel : inactiveLabel}
+    </Badge>
   );
+}
+
+// ─── Field chrome ─────────────────────────────────────────────────────────────
+
+function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
+  return (
+    <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-200 mb-1.5">
+      {children}
+    </label>
+  );
+}
+
+function FieldHint({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">{children}</p>;
 }
 
 // ─── Secret input field ───────────────────────────────────────────────────────
@@ -105,11 +124,9 @@ function SecretInput({
 
   return (
     <div>
-      <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1.5">
-        {label}
-      </label>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <div className="relative">
-        <input
+        <FormInput
           id={id}
           name={id}
           type="text"
@@ -123,23 +140,20 @@ function SecretInput({
           data-1p-ignore="true"
           data-bwignore="true"
           data-form-type="other"
-          className={clsx(
-            "w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 pr-10 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed",
-            !(show && !isMasked) && "secret-mask"
-          )}
+          className={clsx("pr-10 font-mono", !(show && !isMasked) && "secret-mask")}
         />
         {!disabled && !isMasked && value && (
           <button
             type="button"
             onClick={() => setShow((v) => !v)}
             aria-label={show ? "Hide key" : "Show key"}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+            className={clsx("pressable absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 inline-flex items-center justify-center rounded-md text-slate-500 hover:text-slate-200 hover:bg-surface-700", FOCUS_RING)}
           >
             {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         )}
       </div>
-      {hint && <p className="text-[11px] text-slate-600 mt-1">{hint}</p>}
+      {hint && <FieldHint>{hint}</FieldHint>}
     </div>
   );
 }
@@ -158,18 +172,18 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-surface-800/50 border border-surface-600 rounded-xl overflow-hidden">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-5 py-3 sm:py-4 border-b border-surface-600 bg-surface-800/40">
+    <section className="bg-surface-800/50 border border-surface-700 rounded-xl overflow-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-5 py-3.5 border-b border-surface-700">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-surface-700 flex items-center justify-center flex-shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-surface-700/70 border border-surface-600 flex items-center justify-center flex-shrink-0">
             <Icon className="w-4 h-4 text-slate-300" aria-hidden />
           </div>
           <h3 className="text-sm font-semibold text-white">{title}</h3>
         </div>
         {badge && <div className="flex-shrink-0">{badge}</div>}
       </div>
-      <div className="px-4 sm:px-5 py-4 sm:py-5 space-y-4">{children}</div>
-    </div>
+      <div className="px-4 sm:px-5 py-5 space-y-5">{children}</div>
+    </section>
   );
 }
 
@@ -297,6 +311,7 @@ export default function SettingsTab() {
       });
       if (!res.ok) throw new Error("Save failed");
       setSaved(true);
+      toast.success("Settings saved");
       setTimeout(() => setSaved(false), 3000);
       // Keep the full key visible from localStorage — do not replace with masked server value.
       const storedAfterSave = getStoredOpenAIKey();
@@ -306,7 +321,7 @@ export default function SettingsTab() {
       // For Jira token: if the user entered a real value keep it visible; otherwise reload.
       if (!storedAfterSave && !storedGitHubAfterSave && !jiraApiToken) await loadSettings();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      toast.error("Couldn't save settings", { description: e instanceof Error ? e.message : undefined });
     } finally {
       setSaving(false);
     }
@@ -344,7 +359,27 @@ export default function SettingsTab() {
   if (loading) {
     return (
       <TabContent>
-        <LoadingState message="Loading settings…" />
+        <div className="max-w-2xl mx-auto space-y-6" role="status" aria-label="Loading settings">
+          {[2, 1, 3].map((fields, i) => (
+            <div key={i} className="bg-surface-800/50 border border-surface-700 rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-700">
+                <div className="flex items-center gap-2.5">
+                  <Skeleton className="w-8 h-8 rounded-lg" />
+                  <Skeleton className="h-4 w-36" />
+                </div>
+                <Skeleton className="h-6 w-28 rounded-md" />
+              </div>
+              <div className="px-5 py-5 space-y-5">
+                {Array.from({ length: fields }).map((_, j) => (
+                  <div key={j} className="space-y-2">
+                    <Skeleton className="h-3.5 w-32" />
+                    <Skeleton className="h-10 w-full rounded-lg" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </TabContent>
     );
   }
@@ -354,20 +389,23 @@ export default function SettingsTab() {
       <div className="max-w-2xl mx-auto space-y-6">
 
         {isGuest && (
-          <div className="flex items-center gap-2 bg-slate-500/10 border border-slate-500/25 rounded-xl px-4 py-2.5">
-            <Lock className="w-4 h-4 text-slate-400 flex-shrink-0" />
-            <p className="text-xs text-slate-300">
-              🔒 Secure Enterprise Settings (Read-Only for Demo) — integration credentials are hidden and locked for guest visitors.
+          <div className="flex items-start gap-2.5 bg-surface-800/60 border border-surface-700 rounded-xl px-4 py-3">
+            <Lock className="w-4 h-4 text-slate-400 flex-shrink-0 mt-px" aria-hidden />
+            <p className="text-xs text-slate-300 leading-relaxed">
+              <strong className="font-semibold text-slate-200">Read-only demo.</strong>{" "}
+              Integration credentials are hidden and locked for guest visitors.
             </p>
           </div>
         )}
 
         {/* Error */}
         {error && (
-          <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <span>{error}</span>
-          </div>
+          <ErrorBanner>
+            <span className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
+              {error}
+            </span>
+          </ErrorBanner>
         )}
 
         {/* ── 1. AI Configuration ────────────────────────────────────────────── */}
@@ -383,9 +421,9 @@ export default function SettingsTab() {
           }
         >
           {data?.env_has_openai && (
-            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-4 py-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <p className="text-xs text-emerald-300">
+            <div className="flex items-start gap-2.5 bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-3.5 py-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-px" aria-hidden />
+              <p className="text-xs text-emerald-300/90 leading-relaxed">
                 Backend <code className="font-mono">OPENAI_API_KEY</code> is configured — all users get real AI generation automatically.
               </p>
             </div>
@@ -406,15 +444,15 @@ export default function SettingsTab() {
           />
 
           {serverHasOpenAI && !hasRealOpenAIKey && (
-            <p className="text-[11px] text-amber-400 flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5" />
+            <p className="text-xs text-amber-400 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
               A key is saved on your account — paste it here once to activate this browser.
             </p>
           )}
 
           {hasUserOpenAI && (
-            <p className="text-[11px] text-sky-400 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
+            <p className="text-xs text-sky-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
               Your key will be used for all generation and analysis requests.
             </p>
           )}
@@ -443,9 +481,9 @@ export default function SettingsTab() {
           }
         >
           {data?.env_has_github_pat && (
-            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-4 py-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <p className="text-xs text-emerald-300">
+            <div className="flex items-start gap-2.5 bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-3.5 py-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-px" aria-hidden />
+              <p className="text-xs text-emerald-300/90 leading-relaxed">
                 Backend <code className="font-mono">GITHUB_ACTIONS_PAT</code> is set — all visitors can run tests without entering a token.
               </p>
             </div>
@@ -464,8 +502,8 @@ export default function SettingsTab() {
             }
           />
           {hasRealGitHubToken && (
-            <p className="text-[11px] text-sky-400 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
+            <p className="text-xs text-sky-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
               Run Test will dispatch workflow <code className="font-mono">trigger-playwright-test</code> on ShakedGarame/QA-Genius.
             </p>
           )}
@@ -484,25 +522,23 @@ export default function SettingsTab() {
           }
         >
           <div>
-            <label htmlFor="github-issues-repo" className="block text-sm font-medium text-slate-300 mb-1.5">
-              Repository Path
-            </label>
-            <input
+            <FieldLabel htmlFor="github-issues-repo">Repository Path</FieldLabel>
+            <FormInput
               id="github-issues-repo"
               type="text"
               value={githubIssuesRepo}
               onChange={(e) => setGithubIssuesRepo(e.target.value)}
               placeholder="owner/repo"
               disabled={isGuest}
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+              className="font-mono"
             />
-            <p className="text-[11px] text-slate-600 mt-1">
+            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
               Issues created from failure analyses will be filed here. Format: <code className="font-mono">owner/repo</code>
             </p>
           </div>
           {githubIssuesRepo && (
-            <p className="text-[11px] text-sky-400 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
+            <p className="text-xs text-sky-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
               Issues will be created in <code className="font-mono">{githubIssuesRepo}</code>
             </p>
           )}
@@ -521,31 +557,26 @@ export default function SettingsTab() {
           }
         >
           <div>
-            <label htmlFor="jira-domain" className="block text-sm font-medium text-slate-300 mb-1.5">
-              Jira Domain
-            </label>
-            <input
+            <FieldLabel htmlFor="jira-domain">Jira Domain</FieldLabel>
+            <FormInput
               id="jira-domain"
               type="text"
               value={jiraDomain}
               onChange={(e) => setJiraDomain(e.target.value)}
               placeholder="your-domain.atlassian.net"
               disabled={isGuest}
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+              className="font-mono"
             />
           </div>
           <div>
-            <label htmlFor="jira-email" className="block text-sm font-medium text-slate-300 mb-1.5">
-              Account Email
-            </label>
-            <input
+            <FieldLabel htmlFor="jira-email">Account Email</FieldLabel>
+            <FormInput
               id="jira-email"
               type="email"
               value={jiraEmail}
               onChange={(e) => setJiraEmail(e.target.value)}
               placeholder="name@company.com"
               disabled={isGuest}
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
           <SecretInput
@@ -558,8 +589,8 @@ export default function SettingsTab() {
             hint="Generate one at id.atlassian.com/manage-profile/security/api-tokens"
           />
           {jiraDomain && jiraEmail && jiraApiToken && (
-            <p className="text-[11px] text-sky-400 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
+            <p className="text-xs text-sky-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
               Jira tickets will be created on <code className="font-mono">{jiraDomain}</code>
             </p>
           )}
@@ -578,9 +609,9 @@ export default function SettingsTab() {
           }
         >
           {data?.env_has_coralogix && (
-            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-4 py-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <p className="text-xs text-emerald-300">
+            <div className="flex items-start gap-2.5 bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-3.5 py-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-px" aria-hidden />
+              <p className="text-xs text-emerald-300/90 leading-relaxed">
                 Backend <code className="font-mono">CORALOGIX_API_KEY</code> is set — the Log Analyzer will fetch live data.
               </p>
             </div>
@@ -598,59 +629,51 @@ export default function SettingsTab() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="coralogix-team" className="block text-sm font-medium text-slate-300 mb-1.5">
-                Team Name
-              </label>
-              <input
+              <FieldLabel htmlFor="coralogix-team">Team Name</FieldLabel>
+              <FormInput
                 id="coralogix-team"
                 type="text"
                 value={coralogixTeam}
                 onChange={(e) => setCoralogixTeam(e.target.value)}
                 placeholder="my-team"
                 disabled={isGuest}
-                className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
             <div>
-              <label htmlFor="coralogix-region" className="block text-sm font-medium text-slate-300 mb-1.5">
-                Region
-              </label>
-              <select
+              <FieldLabel htmlFor="coralogix-region">Region</FieldLabel>
+              <SelectInput
                 id="coralogix-region"
                 value={coralogixRegion}
                 onChange={(e) => setCoralogixRegion(e.target.value)}
                 disabled={isGuest}
-                className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="EU">EU (Europe)</option>
                 <option value="US">US (United States)</option>
                 <option value="AP">AP (Asia-Pacific)</option>
-              </select>
+              </SelectInput>
             </div>
           </div>
 
           {/* Test connection button */}
           <div className="flex items-center gap-3">
-            <button
-              type="button"
+            <SecondaryButton
               onClick={testCoralogixConnection}
               disabled={!coralogixKey || testingCoralogix}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-700 hover:bg-surface-600 border border-surface-500 rounded-lg text-xs font-medium text-slate-300 transition-all disabled:opacity-40"
             >
               {testingCoralogix ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden />
               ) : (
-                <Wifi className="w-3.5 h-3.5" />
+                <Wifi className="w-3.5 h-3.5" aria-hidden />
               )}
-              Test Connection
-            </button>
+              {testingCoralogix ? "Testing…" : "Test Connection"}
+            </SecondaryButton>
             {coralogixStatus === "ok" && (
-              <span className="flex items-center gap-1.5 text-xs text-emerald-400">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Connected successfully
+              <span role="status" className="flex items-center gap-1.5 text-xs text-emerald-400 animate-fade-in">
+                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" aria-hidden /> Connected successfully
               </span>
             )}
             {coralogixStatus === "fail" && (
-              <span className="flex items-center gap-1.5 text-xs text-red-400">
+              <span role="status" className="flex items-center gap-1.5 text-xs text-red-400 animate-fade-in">
                 <WifiOff className="w-3.5 h-3.5" /> Connection failed — check your key and region
               </span>
             )}
@@ -660,19 +683,17 @@ export default function SettingsTab() {
         {/* ── 3. Local / Git Target ──────────────────────────────────────────── */}
         <Section icon={FolderOpen} title="Local / Git Target">
           <div>
-            <label htmlFor="tests-dir" className="block text-sm font-medium text-slate-300 mb-1.5">
-              Tests Output Directory
-            </label>
-            <input
+            <FieldLabel htmlFor="tests-dir">Tests Output Directory</FieldLabel>
+            <FormInput
               id="tests-dir"
               type="text"
               value={testsDir}
               onChange={(e) => setTestsDir(e.target.value)}
               placeholder="/Users/you/my-project/tests/e2e"
               disabled={isGuest}
-              className="w-full bg-surface-900 border border-surface-500 focus:border-sky-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+              className="font-mono"
             />
-            <p className="text-[11px] text-slate-600 mt-1">
+            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
               Absolute path where generated Playwright test folders are written.
               Defaults to <code className="font-mono">tests/generated/</code> inside the QA-Genius project root.
             </p>
@@ -680,10 +701,10 @@ export default function SettingsTab() {
         </Section>
 
         {/* ── Save button ────────────────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
-          <p className="text-xs text-slate-600">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2 pb-4">
+          <p className="text-xs text-slate-500">
             {isGuest
-              ? "ℹ️ Settings are read-only in demo mode."
+              ? "Settings are read-only in demo mode."
               : "Settings are saved per-account and never shared between users."}
           </p>
           {!isGuest && (
@@ -692,10 +713,11 @@ export default function SettingsTab() {
               onClick={handleSave}
               disabled={saving}
               className={clsx(
-                "flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 w-full sm:w-auto flex-shrink-0",
+                "pressable flex items-center justify-center gap-2 h-10 px-5 rounded-lg text-sm font-medium w-full sm:w-auto flex-shrink-0 border",
+                FOCUS_RING,
                 saved
-                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                  : "bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-900/30",
+                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                  : "bg-sky-600 hover:bg-sky-500 text-white border-transparent shadow-sm shadow-black/30",
                 saving && "opacity-60"
               )}
             >
@@ -706,7 +728,7 @@ export default function SettingsTab() {
             ) : (
               <Save className="w-4 h-4" />
             )}
-              {saving ? "Saving…" : saved ? "Saved!" : "Save Settings"}
+              {saving ? "Saving…" : saved ? "Saved" : "Save Settings"}
             </button>
           )}
         </div>

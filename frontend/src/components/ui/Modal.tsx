@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import clsx from "clsx";
@@ -42,6 +42,18 @@ export default function Modal({
   size = "md",
   bodyClassName,
 }: ModalProps) {
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Move focus into the dialog on open and hand it back to whatever opened it
+  // on close, so keyboard users never get stranded behind the backdrop.
+  useEffect(() => {
+    if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus({ preventScroll: true });
+    return () => previouslyFocused?.focus?.({ preventScroll: true });
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -53,25 +65,31 @@ export default function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-[2px] animate-fade-in"
       onClick={onClose}
     >
+      {/* Modals aren't anchored to a trigger, so they scale from center. */}
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={clsx(
-          "w-full bg-surface-800 border border-surface-600 rounded-2xl shadow-2xl overflow-hidden flex flex-col",
+          "w-full bg-surface-800 border border-surface-600/80 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden flex flex-col outline-none animate-pop-in",
           SIZE_CLASSES[size]
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-600 flex-shrink-0">
+        <div className="flex items-center justify-between gap-3 pl-5 pr-3 h-14 border-b border-surface-700 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             {Icon && <Icon className={clsx("w-4 h-4 flex-shrink-0", iconClassName ?? "text-sky-400")} aria-hidden />}
-            <h3 className="text-sm font-semibold text-white truncate">{title}</h3>
+            <h3 id={titleId} className="text-sm font-semibold text-white truncate">{title}</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded hover:bg-surface-700 text-slate-400 hover:text-white flex-shrink-0"
+            className="pressable w-8 h-8 inline-flex items-center justify-center rounded-lg hover:bg-surface-700 text-slate-400 hover:text-white flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -83,7 +101,7 @@ export default function Modal({
         </div>
 
         {footer && (
-          <div className="px-5 py-3 border-t border-surface-600 bg-surface-900/40 flex justify-end gap-2 flex-shrink-0">
+          <div className="px-5 py-3 border-t border-surface-700 bg-surface-900/40 flex justify-end gap-2 flex-shrink-0">
             {footer}
           </div>
         )}

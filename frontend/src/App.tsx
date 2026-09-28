@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Toaster } from "sonner";
 import { useAuth } from "./hooks/useAuth";
 import AppLayout from "./components/Layout/AppLayout";
 import LoginPage from "./pages/LoginPage";
@@ -12,7 +13,7 @@ function AuthGate() {
     return (
       <div className="min-h-screen bg-surface-900 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+          <div className="w-8 h-8 rounded-full border-2 border-surface-600 border-t-sky-400 animate-spin" />
           <p className="text-sm text-slate-500">
             {isLocalDev ? "Starting local workspace…" : "Loading workspace…"}
           </p>
@@ -34,7 +35,7 @@ function AuthGate() {
           <button
             type="button"
             onClick={() => refresh()}
-            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium"
+            className="pressable px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900"
           >
             Retry connection
           </button>
@@ -58,6 +59,21 @@ function AuthGate() {
 export default function App() {
   return (
     <BrowserRouter>
+      {/* Bottom-center so toasts never collide with the assistant launcher (bottom-right). */}
+      <Toaster
+        theme="dark"
+        position="bottom-center"
+        offset={24}
+        gap={8}
+        toastOptions={{
+          classNames: {
+            toast: "!bg-surface-800 !border !border-surface-600 !text-slate-200 !rounded-xl !shadow-xl !shadow-black/40 !text-sm",
+            description: "!text-slate-400",
+            actionButton: "!bg-sky-600 !text-white",
+            cancelButton: "!bg-surface-700 !text-slate-300",
+          },
+        }}
+      />
       <Routes>
         {/* Public — no auth check, reachable without a QA-Genius session. */}
         <Route path="/showcase/:slug" element={<ShowcasePage />} />

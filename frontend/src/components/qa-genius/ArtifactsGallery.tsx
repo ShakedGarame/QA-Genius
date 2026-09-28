@@ -175,8 +175,8 @@ export default function ArtifactsGallery({
                     type="button"
                     onClick={() => openLightbox(shot.dataUrl, shot.name)}
                     className={clsx(
-                      "group relative flex-shrink-0 rounded-lg border overflow-hidden transition-all cursor-zoom-in",
-                      "w-40 h-28 bg-surface-950",
+                      "pressable group relative flex-shrink-0 rounded-lg border overflow-hidden cursor-zoom-in",
+                      "w-40 h-28 bg-surface-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60",
                       "border-surface-600 hover:border-violet-500/70 hover:ring-1 hover:ring-violet-500/30"
                     )}
                     title={`Click to enlarge: ${shot.name}`}
@@ -273,7 +273,7 @@ export default function ArtifactsGallery({
                 const shot = gallery?.screenshots.find((s) => s.dataUrl === selectedShot);
                 openLightbox(selectedShot, shot?.name ?? "screenshot");
               }}
-              className="group relative w-full rounded-lg border border-surface-600 overflow-hidden bg-surface-950 cursor-zoom-in hover:border-violet-500/50 transition-colors"
+              className="group relative w-full rounded-lg border border-surface-600 overflow-hidden bg-surface-900 cursor-zoom-in hover:border-violet-500/50 transition-colors"
             >
               <img
                 src={selectedShot}
@@ -298,7 +298,7 @@ export default function ArtifactsGallery({
                     openLightbox(shot.dataUrl, shot.name);
                   }}
                   className={clsx(
-                    "group relative rounded border overflow-hidden aspect-video bg-surface-950",
+                    "group relative rounded border overflow-hidden aspect-video bg-surface-900",
                     "hover:border-violet-500/50 transition-colors cursor-zoom-in",
                     selectedShot === shot.dataUrl
                       ? "border-violet-500 ring-1 ring-violet-500/40"

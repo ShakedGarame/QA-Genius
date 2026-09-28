@@ -80,7 +80,7 @@ export default function AssistantWidget() {
       <button
         type="button"
         onClick={() => setIsOpen((v) => !v)}
-        className="fixed bottom-5 right-5 z-[60] w-12 h-12 rounded-full bg-sky-500 hover:bg-sky-400 text-white shadow-2xl flex items-center justify-center transition-colors"
+        className="pressable fixed bottom-5 right-5 z-[60] w-12 h-12 rounded-full bg-sky-500 hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900 text-white shadow-2xl flex items-center justify-center"
         aria-label={isOpen ? "Close assistant" : "Open assistant"}
       >
         {isOpen ? <X className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
@@ -88,7 +88,7 @@ export default function AssistantWidget() {
 
       {isOpen && (
         <div
-          className="fixed bottom-20 right-5 z-[60] w-[min(360px,calc(100vw-2.5rem))] max-h-[70vh] bg-surface-800 border border-surface-600 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          className="origin-bottom-right animate-pop-in fixed bottom-20 right-5 z-[60] w-[min(360px,calc(100vw-2.5rem))] max-h-[70vh] bg-surface-800 border border-surface-600 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
           role="region"
           aria-label="AI assistant"
         >
@@ -147,7 +147,7 @@ export default function AssistantWidget() {
               type="button"
               onClick={handleSend}
               disabled={isSending || !input.trim()}
-              className="w-9 h-9 flex-shrink-0 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-40 disabled:hover:bg-sky-500 text-white flex items-center justify-center transition-colors"
+              className="pressable w-9 h-9 flex-shrink-0 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-40 disabled:hover:bg-sky-500 text-white flex items-center justify-center"
               aria-label="Send"
             >
               {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

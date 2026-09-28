@@ -156,7 +156,7 @@ function CodePanel({
                   key={rowIdx}
                   data-row={rowIdx}
                   className={clsx(
-                    !isFiller && "hover:bg-slate-800/20",
+                    !isFiller && "hover:bg-surface-700/30",
                     isHighlighted && rowBg,
                     isFiller && "bg-surface-900/30"
                   )}
@@ -348,15 +348,18 @@ export default function SelfHealModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-[2px] animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="relative flex flex-col w-11/12 max-w-7xl h-[88vh] bg-slate-950 rounded-xl border border-slate-800 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Self-Heal Test Code"
+        className="relative flex flex-col w-11/12 max-w-7xl h-[88vh] bg-surface-900 rounded-xl border border-surface-600/80 shadow-2xl shadow-black/50 animate-pop-in"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-700 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
               <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
@@ -474,7 +477,7 @@ export default function SelfHealModal({
 
         {/* Footer */}
         {healResult && !isHealing && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-slate-800 bg-surface-900/40 flex-shrink-0">
+          <div className="flex items-center justify-between px-5 py-3 border-t border-surface-700 bg-surface-900/40 flex-shrink-0">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <FileCode2 className="w-3.5 h-3.5 flex-shrink-0" />
               {changedCount > 0 ? (
@@ -498,7 +501,7 @@ export default function SelfHealModal({
                   onClick={() => void handleSave()}
                   disabled={saveStatus === "saving" || saveStatus === "saved"}
                   className={clsx(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-lg",
+                    "pressable flex items-center gap-2 h-8 px-4 rounded-lg text-xs font-medium shadow-sm shadow-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70",
                     saveStatus === "saved"
                       ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default"
                       : saveStatus === "saving"

@@ -23,34 +23,50 @@ export function useTestRepository() {
     }
   }, []);
 
-  const deleteTest = useCallback(async (featureSlug: string, fileName: string) => {
+  // Deletes are optimistic: the UI updates immediately and rolls back if the
+  // server rejects. Both resolve true/false so callers can toast the outcome.
+  const deleteTest = useCallback(async (featureSlug: string, fileName: string): Promise<boolean> => {
+    let featuresSnapshot: FeatureGroup[] = [];
+    let testsSnapshot: TestFileInfo[] = [];
+    setFeatures((prev) => {
+      featuresSnapshot = prev;
+      return prev.map((f) =>
+        f.meta.slug === featureSlug
+          ? { ...f, tests: f.tests.filter((t) => t.fileName !== fileName) }
+          : f
+      ).filter((f) => f.tests.length > 0);
+    });
+    setTests((prev) => {
+      testsSnapshot = prev;
+      return prev.filter((t) => !(t.featureSlug === featureSlug && t.fileName === fileName));
+    });
     try {
       const res = await fetch(
         `/api/tests/${encodeURIComponent(featureSlug)}/${encodeURIComponent(fileName)}`,
         { method: "DELETE", credentials: "include" }
       );
       if (!res.ok) throw new Error("Delete failed");
-      setFeatures((prev) =>
-        prev.map((f) =>
-          f.meta.slug === featureSlug
-            ? { ...f, tests: f.tests.filter((t) => t.fileName !== fileName) }
-            : f
-        ).filter((f) => f.tests.length > 0)
-      );
-      setTests((prev) => prev.filter((t) => !(t.featureSlug === featureSlug && t.fileName === fileName)));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      return true;
+    } catch {
+      setFeatures(featuresSnapshot);
+      setTests(testsSnapshot);
+      return false;
     }
   }, []);
 
-  const deleteFeature = useCallback(async (featureSlug: string) => {
+  const deleteFeature = useCallback(async (featureSlug: string): Promise<boolean> => {
+    let featuresSnapshot: FeatureGroup[] = [];
+    let testsSnapshot: TestFileInfo[] = [];
+    setFeatures((prev) => { featuresSnapshot = prev; return prev.filter((f) => f.meta.slug !== featureSlug); });
+    setTests((prev) => { testsSnapshot = prev; return prev.filter((t) => t.featureSlug !== featureSlug); });
     try {
       const res = await fetch(`/api/tests/${encodeURIComponent(featureSlug)}`, { method: "DELETE", credentials: "include" });
       if (!res.ok) throw new Error("Delete failed");
-      setFeatures((prev) => prev.filter((f) => f.meta.slug !== featureSlug));
-      setTests((prev) => prev.filter((t) => t.featureSlug !== featureSlug));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      return true;
+    } catch {
+      setFeatures(featuresSnapshot);
+      setTests(testsSnapshot);
+      return false;
     }
   }, []);
 

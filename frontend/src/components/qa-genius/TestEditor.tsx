@@ -90,9 +90,25 @@ export default function TestEditor({ code, onChange, readOnly = false, fileName 
           defaultLanguage="typescript"
           value={code}
           onChange={(val) => onChange?.(val ?? "")}
+          // `theme` must be a prop — @monaco-editor/react ignores it inside
+          // `options`, which left every editor rendering in the light theme.
+          theme="qa-dark"
+          beforeMount={(monaco) => {
+            monaco.editor.defineTheme("qa-dark", {
+              base: "vs-dark",
+              inherit: true,
+              rules: [],
+              colors: {
+                "editor.background": "#0d1117",
+                "editorGutter.background": "#0d1117",
+                "editor.lineHighlightBackground": "#161b22",
+                "editorLineNumber.foreground": "#3d444d",
+                "editorLineNumber.activeForeground": "#8b949e",
+              },
+            });
+          }}
           options={{
             readOnly,
-            theme: "vs-dark",
             fontSize: 13,
             lineNumbers: "on",
             minimap: { enabled: false },
@@ -106,9 +122,7 @@ export default function TestEditor({ code, onChange, readOnly = false, fileName 
             cursorBlinking: "smooth",
           }}
           loading={
-            <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-              Loading editor…
-            </div>
+            <div className="h-full w-full bg-surface-900" aria-label="Loading editor" />
           }
         />
       </div>

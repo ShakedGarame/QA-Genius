@@ -101,7 +101,7 @@ export default function ExecutionConsole({
                   onClick={() => setExpanded(true)}
                   title="Expand to Full Screen"
                   aria-label="Expand to Full Screen"
-                  className="p-1.5 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                  className="p-1.5 rounded-md text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors"
                 >
                   <Maximize2 className="w-3.5 h-3.5" />
                 </button>
@@ -114,8 +114,9 @@ export default function ExecutionConsole({
         {isRunning && progress > 0 && (
           <div className="h-0.5 bg-surface-700">
             <div
-              className="h-full bg-sky-500 transition-all duration-300"
-              style={{ width: `${progress}%` }}
+              // scaleX instead of width: progress updates stay on the compositor.
+              className="h-full bg-sky-500 origin-left transition-transform duration-300 ease-linear"
+              style={{ transform: `scaleX(${Math.min(progress, 100) / 100})` }}
             />
           </div>
         )}

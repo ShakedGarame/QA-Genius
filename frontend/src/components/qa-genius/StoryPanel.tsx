@@ -25,7 +25,7 @@ export default function StoryPanel({ userStories, activeStoryId, onSelect }: Pro
           <button
             key={story.id}
             onClick={() => onSelect?.(story.id)}
-            className={`w-full text-left rounded-lg border p-4 transition-all ${
+            className={`w-full text-left rounded-lg border p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 ${
               isActive
                 ? "border-sky-500/50 bg-sky-500/10"
                 : "border-surface-600 bg-surface-800 hover:border-surface-500 hover:bg-surface-700/50"

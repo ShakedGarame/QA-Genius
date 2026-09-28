@@ -21,16 +21,21 @@ export function useManualStds() {
     }
   }, []);
 
-  const deleteStd = useCallback(async (id: string) => {
+  // Optimistic: the row disappears immediately and is restored if the server
+  // rejects the delete. Resolves true/false so callers can toast the outcome.
+  const deleteStd = useCallback(async (id: string): Promise<boolean> => {
+    let snapshot: ManualStdRecord[] = [];
+    setStds((prev) => { snapshot = prev; return prev.filter((s) => s.id !== id); });
     try {
       const res = await fetch(`/api/manual-std/${encodeURIComponent(id)}`, {
         method: "DELETE",
         credentials: "include",
       });
       if (!res.ok) throw new Error("Delete failed");
-      setStds((prev) => prev.filter((s) => s.id !== id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      return true;
+    } catch {
+      setStds(snapshot);
+      return false;
     }
   }, []);
 

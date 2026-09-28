@@ -21,16 +21,20 @@ export function useLogHistory() {
     }
   }, []);
 
-  const deleteAnalysis = useCallback(async (id: string) => {
+  // Optimistic: removed immediately, restored on failure. Resolves true/false.
+  const deleteAnalysis = useCallback(async (id: string): Promise<boolean> => {
+    let snapshot: LogAnalysisRecord[] = [];
+    setAnalyses((prev) => { snapshot = prev; return prev.filter((a) => a.id !== id); });
     try {
       const res = await fetch(`/api/log-analyses/${encodeURIComponent(id)}`, {
         method: "DELETE",
         credentials: "include",
       });
       if (!res.ok) throw new Error("Delete failed");
-      setAnalyses((prev) => prev.filter((a) => a.id !== id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      return true;
+    } catch {
+      setAnalyses(snapshot);
+      return false;
     }
   }, []);
 

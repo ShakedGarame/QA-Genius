@@ -1,26 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, X } from "lucide-react";
+import { X } from "lucide-react";
 import clsx from "clsx";
-
-// ── useCopyText ───────────────────────────────────────────────────────────────
-
-export function useCopyText() {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const copy = (text: string) => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
-
-  return { copied, copy };
-}
+import { CopyButton as BaseCopyButton, FOCUS_RING } from "./layout";
 
 // ── CopyButton ────────────────────────────────────────────────────────────────
 
@@ -32,32 +14,9 @@ interface CopyButtonProps {
   title?: string;
 }
 
+/** Back-compat adapter over the shared CopyButton in ./layout. */
 export function CopyButton({ text, className, iconOnly = false, title }: CopyButtonProps) {
-  const { copied, copy } = useCopyText();
-  const tooltip = copied ? "Copied!" : (title ?? "Copy to clipboard");
-
-  return (
-    <button
-      type="button"
-      onClick={() => copy(text)}
-      title={tooltip}
-      aria-label={tooltip}
-      className={clsx(
-        iconOnly
-          ? "p-1.5 rounded-md transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-          : "flex items-center gap-1 px-2 py-1 rounded text-xs transition-all",
-        !iconOnly &&
-          (copied
-            ? "text-emerald-400 bg-emerald-500/10"
-            : "text-slate-400 hover:text-slate-200 hover:bg-surface-700"),
-        iconOnly && copied && "text-emerald-400",
-        className
-      )}
-    >
-      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-      {!iconOnly && <span>{copied ? "Copied!" : "Copy"}</span>}
-    </button>
-  );
+  return <BaseCopyButton text={text} label={title ?? "Copy"} showLabel={!iconOnly} className={className} />;
 }
 
 // ── FullscreenModal ───────────────────────────────────────────────────────────
@@ -94,20 +53,22 @@ export default function FullscreenModal({
   return createPortal(
     // Overlay — clicking outside the inner box closes the modal
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/70 backdrop-blur-[2px] animate-fade-in"
       onClick={onClose}
     >
       {/* Inner box — stop click propagation so clicking inside doesn't close */}
       <div
+        role="dialog"
+        aria-modal="true"
         className={clsx(
-          "relative flex flex-col w-full sm:w-11/12 max-w-6xl h-[92vh] sm:h-[80vh]",
-          "bg-slate-950 rounded-xl border border-slate-800 shadow-2xl",
+          "relative flex flex-col w-full sm:w-11/12 max-w-6xl h-[92vh] sm:h-[80vh] animate-pop-in",
+          "bg-surface-900 rounded-xl border border-surface-600/80 shadow-2xl shadow-black/50",
           innerClassName
         )}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 flex-shrink-0">
+        <div className="flex items-center justify-between pl-5 pr-3 h-12 border-b border-surface-700 flex-shrink-0">
           <div className="flex items-center gap-2 text-sm font-mono text-slate-300 min-w-0 truncate">
             {title}
           </div>
@@ -117,7 +78,8 @@ export default function FullscreenModal({
               type="button"
               onClick={onClose}
               title="Close (Esc)"
-              className="flex items-center gap-1 p-2 sm:px-2 sm:py-1 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors"
+              aria-label="Close"
+              className={clsx("pressable flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700", FOCUS_RING)}
             >
               <X className="w-4 h-4" />
               <span className="hidden sm:inline">Close</span>

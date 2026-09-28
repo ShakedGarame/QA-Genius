@@ -3,20 +3,20 @@ import {
   BrainCircuit,
   Bug,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   ExternalLink,
   FileCode2,
   Github,
   Info,
   Loader2,
+  Pencil,
   RotateCcw,
   ShieldAlert,
   Sparkles,
   Wrench,
-  Zap,
 } from "lucide-react";
 import clsx from "clsx";
+import { toast } from "sonner";
 import { RawLogAnalysisResponse } from "../../types";
 import { buildOpenAIKeyHeaders } from "../../lib/apiKeys";
 import { buildGitHubTokenHeaders } from "../../lib/githubToken";
@@ -28,8 +28,16 @@ import {
   SectionLabel,
   FormInput,
   FormTextarea,
+  SelectInput,
   ErrorBanner,
   PrimaryButton,
+  SecondaryButton,
+  IconButton,
+  CopyButton,
+  Badge,
+  Skeleton,
+  FOCUS_RING,
+  type BadgeTone,
 } from "../../components/ui/layout";
 import SelfHealModal from "../../components/qa-genius/SelfHealModal";
 
@@ -74,13 +82,79 @@ Error response from daemon: OCI runtime create failed: container_linux.go:380: s
 
 type LogSource = typeof LOG_SOURCES[number]["value"];
 
-const SEVERITY_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  critical: { label: "CRITICAL", color: "text-red-300", bg: "bg-red-500/15 border-red-500/30" },
-  high: { label: "HIGH", color: "text-orange-300", bg: "bg-orange-500/15 border-orange-500/30" },
-  medium: { label: "MEDIUM", color: "text-yellow-300", bg: "bg-yellow-500/15 border-yellow-500/30" },
-  low: { label: "LOW", color: "text-blue-300", bg: "bg-blue-500/15 border-blue-500/30" },
-  unknown: { label: "UNKNOWN", color: "text-slate-400", bg: "bg-slate-500/15 border-slate-500/30" },
+const SEVERITY_CONFIG: Record<string, { label: string; tone: BadgeTone }> = {
+  critical: { label: "Critical", tone: "danger" },
+  high: { label: "High", tone: "orange" },
+  medium: { label: "Medium", tone: "warning" },
+  low: { label: "Low", tone: "info" },
+  unknown: { label: "Unknown", tone: "neutral" },
 };
+
+/** Result card with a colored eyebrow title and an optional copy action. */
+function ResultCard({
+  icon: Icon,
+  title,
+  tone,
+  copyText,
+  className,
+  children,
+}: {
+  icon: typeof Info;
+  title: string;
+  tone: "orange" | "sky" | "emerald";
+  copyText?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const toneClass = {
+    orange: "text-orange-300",
+    sky: "text-sky-300",
+    emerald: "text-emerald-300",
+  }[tone];
+  return (
+    <section className={clsx("rounded-xl bg-surface-800/50 border border-surface-700 p-4 sm:p-5", className)}>
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <h3 className={clsx("flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider", toneClass)}>
+          <Icon className="w-4 h-4" aria-hidden />
+          {title}
+        </h3>
+        {copyText && <CopyButton text={copyText} label={`Copy ${title.toLowerCase()}`} />}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function AnalysisSkeleton({ statusMessage }: { statusMessage: string }) {
+  return (
+    <div className="space-y-4 animate-fade-in" role="status" aria-live="polite">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+          <Loader2 className="w-4 h-4 text-violet-400 animate-spin" aria-hidden />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-slate-200">Analyzing logs…</p>
+          <p className="text-xs text-slate-500">{statusMessage || "Sending to AI engine"}</p>
+        </div>
+      </div>
+      {[
+        { lines: [90, 60], h: "h-4" },
+        { lines: [100, 95, 70], h: "h-3" },
+      ].map((card, i) => (
+        <div key={i} className="rounded-xl bg-surface-800/50 border border-surface-700 p-4 sm:p-5 space-y-3">
+          <Skeleton className="h-3 w-32" />
+          {card.lines.map((w, j) => (
+            <Skeleton key={j} className={card.h} style={{ width: `${w}%` }} />
+          ))}
+        </div>
+      ))}
+      <div className="rounded-xl bg-surface-800/50 border border-surface-700 p-4 sm:p-5 space-y-3">
+        <Skeleton className="h-3 w-40" />
+        <Skeleton className="h-48 w-full rounded-lg" />
+      </div>
+    </div>
+  );
+}
 
 const HEAL_ELIGIBLE_SOURCES: LogSource[] = ["playwright"];
 const HEAL_ELIGIBLE_CATEGORIES = ["test-failure"];
@@ -243,7 +317,11 @@ export default function LogAnalyzerTab() {
     if (result) {
       setInputCollapsed(true);
       setResultTimestamp(Date.now());
-      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Wait a frame so the input card has collapsed before measuring —
+      // otherwise the scroll target is computed against the taller layout.
+      requestAnimationFrame(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     }
   }, [result]);
 
@@ -305,6 +383,9 @@ export default function LogAnalyzerTab() {
       if (!res.ok) throw new Error(data.error ?? "Failed to create issue");
       setGithubStatus("success");
       setGithubTicketUrl(data.issueUrl ?? null);
+      toast.success("GitHub issue created", data.issueUrl
+        ? { action: { label: "Open", onClick: () => window.open(data.issueUrl, "_blank", "noopener,noreferrer") } }
+        : undefined);
     } catch (err) {
       setGithubStatus("error");
       setGithubErrorMsg(err instanceof Error ? err.message : "Failed to create GitHub issue");
@@ -342,6 +423,9 @@ export default function LogAnalyzerTab() {
       if (!res.ok) throw new Error(data.error ?? "Failed to create Jira ticket");
       setJiraStatus("success");
       setJiraTicketUrl(data.issueUrl ?? null);
+      toast.success("Jira issue created", data.issueUrl
+        ? { action: { label: "Open", onClick: () => window.open(data.issueUrl, "_blank", "noopener,noreferrer") } }
+        : undefined);
     } catch (err) {
       setJiraStatus("error");
       setJiraErrorMsg(err instanceof Error ? err.message : "Failed to create Jira ticket");
@@ -353,33 +437,35 @@ export default function LogAnalyzerTab() {
       {/* ── Top: input card (collapses to a sticky summary once analysis completes) ── */}
       <div className={clsx("flex-shrink-0 p-4 sm:p-6 pb-4", inputCollapsed && "sticky top-0 z-10 bg-surface-900")}>
         {inputCollapsed ? (
-          <div className="flex items-center gap-2 flex-wrap bg-surface-800/60 border border-surface-700 rounded-xl px-4 py-2.5 text-xs text-slate-300">
-            <span className="text-slate-500">Test:</span>
-            <span className="font-semibold text-slate-200 truncate max-w-[200px]">{runName.trim() || "Untitled"}</span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-500">Source:</span>
-            <span>{activeSource.icon} {activeSource.label}</span>
-            <button
-              onClick={() => setInputCollapsed(false)}
-              className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 transition-colors flex-shrink-0"
-            >
-              ✏️ Edit Logs
-            </button>
+          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap bg-surface-800/80 backdrop-blur-sm border border-surface-700 rounded-xl pl-4 pr-2 py-2 text-xs animate-fade-in">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className="text-slate-500">Test</span>
+              <span className="font-medium text-slate-200 truncate max-w-[200px]">{runName.trim() || "Untitled"}</span>
+            </span>
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className="text-slate-500">Source</span>
+              <span className="text-slate-300 truncate">{activeSource.label}</span>
+            </span>
+            <SecondaryButton onClick={() => setInputCollapsed(false)} className="ml-auto">
+              <Pencil className="w-3.5 h-3.5" aria-hidden />
+              Edit logs
+            </SecondaryButton>
           </div>
         ) : (
-        <div className="bg-surface-800/60 border border-surface-700 rounded-xl p-5 space-y-4">
+        <div className="bg-surface-800/50 border border-surface-700 rounded-xl p-4 sm:p-5 space-y-5">
           <div>
-            <h2 className="text-sm font-semibold text-slate-200">Instant Log Analyzer</h2>
-            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-              Paste logs — AI explains the root cause in plain language
+            <h2 className="text-base font-semibold text-slate-100">Instant Log Analyzer</h2>
+            <p className="text-sm text-slate-400 mt-1 leading-relaxed">
+              Paste logs — AI explains the root cause in plain language.
             </p>
           </div>
 
           <div className="flex flex-col lg:flex-row gap-4">
             {/* Test / feature name (optional) — used as the primary title in History */}
             <div className="flex-1 min-w-0">
-              <SectionLabel>Test / Feature Name (optional)</SectionLabel>
+              <SectionLabel htmlFor="log-run-name">Test / Feature Name (optional)</SectionLabel>
               <FormInput
+                id="log-run-name"
                 value={runName}
                 onChange={(e) => setRunName(e.target.value)}
                 placeholder="e.g. Login Flow, Checkout API"
@@ -389,38 +475,36 @@ export default function LogAnalyzerTab() {
 
             {/* Source dropdown */}
             <div className="w-full lg:w-72 flex-shrink-0">
-              <SectionLabel>Log Source</SectionLabel>
-              <div className="relative">
-                <select
+              <SectionLabel htmlFor="log-source">Log Source</SectionLabel>
+              <SelectInput
+                  id="log-source"
                   value={source}
                   onChange={(e) => {
                     setSource(e.target.value as LogSource);
                     setRawLogs("");
                     setResult(null);
                   }}
-                  className="w-full appearance-none bg-surface-900 border border-surface-600 text-slate-200 text-sm rounded-lg px-4 py-2.5 pr-8 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 cursor-pointer"
                 >
                   {LOG_SOURCES.map((s) => (
                     <option key={s.value} value={s.value}>
                       {s.icon} {s.label}
                     </option>
                   ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              </div>
+              </SelectInput>
             </div>
           </div>
 
           {/* Log text area */}
           <div>
-            <SectionLabel>Raw Logs / Error Output</SectionLabel>
+            <SectionLabel htmlFor="log-raw">Raw Logs / Error Output</SectionLabel>
             <FormTextarea
+              id="log-raw"
               value={rawLogs}
               onChange={(e) => setRawLogs(e.target.value)}
               placeholder={activeSource.placeholder}
               className="min-h-[120px]"
             />
-            <p className="text-[10px] text-slate-600 mt-1 text-right">
+            <p className="text-[11px] text-slate-500 mt-1.5 text-right tabular-nums">
               {rawLogs.length.toLocaleString()} characters
             </p>
           </div>
@@ -429,19 +513,22 @@ export default function LogAnalyzerTab() {
           {isPlaywright && (
             <div>
               <button
+                type="button"
                 onClick={() => setShowTestCodeField((v) => !v)}
-                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors mb-1.5 group"
+                aria-expanded={showTestCodeField}
+                className={clsx("flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors mb-2 rounded", FOCUS_RING)}
               >
-                {showTestCodeField
-                  ? <ChevronDown className="w-3.5 h-3.5" />
-                  : <ChevronRight className="w-3.5 h-3.5" />}
-                <FileCode2 className="w-3.5 h-3.5" />
+                <ChevronRight
+                  className={clsx("w-3.5 h-3.5 transition-transform duration-200 ease-out", showTestCodeField && "rotate-90")}
+                  aria-hidden
+                />
+                <FileCode2 className="w-3.5 h-3.5" aria-hidden />
                 <span className="font-medium">
                   Test Code{" "}
-                  <span className="text-slate-600 font-normal">(optional — enables Self-Heal)</span>
+                  <span className="text-slate-500 font-normal">(optional — enables Self-Heal)</span>
                 </span>
                 {testCode && (
-                  <span className="ml-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span className="ml-1 w-1.5 h-1.5 rounded-full bg-emerald-500" aria-label="Test code provided" />
                 )}
               </button>
 
@@ -470,12 +557,12 @@ export default function LogAnalyzerTab() {
               {isAnalyzing ? (statusMessage || "Analyzing…") : "Analyze Logs"}
             </PrimaryButton>
             {(rawLogs || result) && (
-              <button
+              <IconButton
+                icon={RotateCcw}
+                label="Clear logs and result"
                 onClick={handleClear}
-                className="px-3 py-2.5 text-slate-400 hover:text-slate-200 bg-surface-700 hover:bg-surface-600 rounded-lg transition-colors flex-shrink-0"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
+                className="w-10 h-10 bg-surface-700/80 border border-surface-600"
+              />
             )}
           </div>
 
@@ -485,120 +572,84 @@ export default function LogAnalyzerTab() {
       </div>
 
       {/* ── Bottom: full-width results canvas ── */}
-      <div className="qa-main-pane overflow-visible p-4 sm:p-6 pt-0 pb-24 flex flex-col">
+      <div className="qa-main-pane overflow-visible px-4 sm:px-6 pt-2 pb-24 flex flex-col">
         {!result && !isAnalyzing && (
           <EmptyState
             icon={BrainCircuit}
             accent="violet"
             title="No analysis yet"
-            description='Paste your logs on the left and click "Analyze Logs" to get a plain-language root cause breakdown.'
+            description='Paste your logs above and click "Analyze Logs" to get a plain-language root cause breakdown.'
             hint="Supports: Playwright · Coralogix · Node.js · Jest · Docker"
           />
         )}
 
-        {isAnalyzing && (
-          <EmptyState
-            icon={Zap}
-            accent="violet"
-            title="Analyzing logs…"
-            description={statusMessage || "Sending to AI engine"}
-          />
-        )}
+        {isAnalyzing && <AnalysisSkeleton statusMessage={statusMessage} />}
 
         {result && !isAnalyzing && (
-          <div ref={resultRef} className="p-4 sm:p-6 space-y-5 animate-fade-in">
+          <div ref={resultRef} className="space-y-4 animate-slide-up scroll-mt-32">
             {/* Header row: icon + title + badges */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
-                  <BrainCircuit className="w-4 h-4 text-violet-400" />
+                <div className="w-9 h-9 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+                  <BrainCircuit className="w-4 h-4 text-violet-400" aria-hidden />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-200">AI Analysis Complete</p>
+                  <p className="text-sm font-semibold text-slate-100">AI Analysis Complete</p>
                   <p className="text-xs text-slate-500">
-                    {activeSource.icon} {activeSource.label}
-                    {runName.trim() && <span className="text-slate-600"> · {runName.trim()}</span>}
+                    {activeSource.label}
+                    {runName.trim() && <span> · {runName.trim()}</span>}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 {resultTimestamp && (
-                  <span className="text-[10px] text-slate-600">
+                  <span className="text-[11px] text-slate-500 tabular-nums">
                     {new Date(resultTimestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
                 )}
+                {result.category && result.category !== "unknown" && (
+                  <Badge tone="neutral" className="normal-case font-mono tracking-normal">{result.category}</Badge>
+                )}
                 {result.severity && SEVERITY_CONFIG[result.severity] && (
-                  <span
-                    className={clsx(
-                      "text-[10px] font-bold px-2 py-1 rounded border",
-                      SEVERITY_CONFIG[result.severity].bg,
-                      SEVERITY_CONFIG[result.severity].color
-                    )}
-                  >
+                  <Badge tone={SEVERITY_CONFIG[result.severity].tone} dot>
                     {SEVERITY_CONFIG[result.severity].label}
-                  </span>
+                  </Badge>
                 )}
-                {result.isMock && (
-                  <span className="text-[10px] text-slate-500 bg-surface-700 px-2 py-0.5 rounded border border-surface-500">
-                    MOCK
-                  </span>
-                )}
+                {result.isMock && <Badge tone="warning">Mock</Badge>}
               </div>
             </div>
 
-            {/* Root cause */}
-            <div className="rounded-xl bg-surface-800/50 border border-surface-600 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <ShieldAlert className="w-4 h-4 text-orange-400" />
-                <p className="text-xs font-bold text-orange-300 uppercase tracking-wider">Root Cause</p>
-              </div>
-              <p className="text-sm font-semibold text-slate-100 leading-relaxed">
+            <ResultCard icon={ShieldAlert} title="Root Cause" tone="orange" copyText={result.rootCause} className="border-orange-500/15">
+              <p className="text-[15px] font-medium text-slate-100 leading-relaxed">
                 {result.rootCause}
               </p>
-            </div>
+            </ResultCard>
 
-            {/* Technical explanation */}
-            <div className="rounded-xl bg-surface-800/50 border border-surface-600 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Info className="w-4 h-4 text-sky-400" />
-                <p className="text-xs font-bold text-sky-300 uppercase tracking-wider">
-                  Technical Explanation
-                </p>
-              </div>
+            <ResultCard icon={Info} title="Technical Explanation" tone="sky" copyText={result.explanation}>
               <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
                 {result.explanation}
               </p>
-            </div>
+            </ResultCard>
 
             {/* Suggested fix — syntax-highlighted, read-only */}
-            <div className="rounded-xl bg-surface-800 border border-emerald-500/20 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Wrench className="w-4 h-4 text-emerald-400" />
-                  <p className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
-                    Recommended Code Fix
-                  </p>
-                </div>
-              </div>
-              <div className="h-72 rounded-lg overflow-hidden">
+            <ResultCard icon={Wrench} title="Recommended Code Fix" tone="emerald" className="border-emerald-500/15">
+              <div className="h-72 rounded-lg overflow-hidden border border-surface-700">
                 <Suspense
                   fallback={
-                    <div className="w-full h-full flex items-center justify-center bg-surface-900 text-slate-500 text-sm">
-                      Loading editor…
-                    </div>
+                    <Skeleton className="w-full h-full rounded-none" />
                   }
                 >
                   <TestEditor code={result.suggestedFix} readOnly fileName="suggested-fix.ts" />
                 </Suspense>
               </div>
-            </div>
+            </ResultCard>
 
             {/* Primary Action Bar — sits statically below the code fix in normal document
                 flow so it never overlays content or blocks page scroll. */}
-            <div className="pt-3 pb-1">
-            <div className="rounded-xl border bg-surface-800 border-surface-600 p-4 sm:p-5 shadow-2xl">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">
-                Actions
+            <div className="pt-2 pb-1">
+            <div className="rounded-xl border bg-surface-800/50 border-surface-700 p-4 sm:p-5">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                Next steps
               </p>
               <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-start sm:justify-end gap-3">
                 {/* Jira */}
@@ -614,14 +665,15 @@ export default function LogAnalyzerTab() {
                       placeholder="KEY"
                       maxLength={10}
                       title="Jira project key (e.g. QA, BUG)"
-                      className="w-[68px] bg-surface-900 border border-surface-600 text-slate-200 text-xs rounded-lg px-2 py-2 font-mono placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-[#0052CC] focus:border-[#0052CC] uppercase"
+                      aria-label="Jira project key"
+                      className="w-[68px] h-8 bg-surface-900 border border-surface-600 text-slate-200 text-xs rounded-lg px-2 font-mono placeholder-slate-600 uppercase transition-[border-color,box-shadow] focus:outline-none focus:border-sky-500/70 focus:ring-2 focus:ring-sky-500/25"
                     />
                     {jiraStatus === "success" && jiraTicketUrl ? (
                       <a
                         href={jiraTicketUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
+                        className={clsx("pressable flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20", FOCUS_RING)}
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         Jira Ticket Created
@@ -631,7 +683,7 @@ export default function LogAnalyzerTab() {
                       <button
                         onClick={() => void handleFileJiraTicket()}
                         disabled={jiraStatus === "loading"}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-[#0052CC] hover:bg-[#0747A6] disabled:opacity-60 disabled:cursor-not-allowed text-white transition-colors"
+                        className={clsx("pressable flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-[#0052CC] hover:bg-[#0747A6] disabled:opacity-60 disabled:cursor-not-allowed text-white", FOCUS_RING)}
                       >
                         {jiraStatus === "loading" ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -643,7 +695,7 @@ export default function LogAnalyzerTab() {
                     )}
                   </div>
                   {(jiraStatus === "error" || jiraErrorMsg) && (
-                    <p className="text-[10px] text-red-400 max-w-[260px] leading-tight">
+                    <p className="text-[11px] text-red-400 max-w-[260px] leading-tight">
                       {jiraErrorMsg}
                       {!user?.hasJira && (
                         <>
@@ -659,7 +711,7 @@ export default function LogAnalyzerTab() {
                       )}
                     </p>
                   )}
-                  <p className="text-[10px] text-slate-600">
+                  <p className="text-[11px] text-slate-500">
                     Leave blank to use the project key from your Jira Domain URL
                   </p>
                 </div>
@@ -671,7 +723,7 @@ export default function LogAnalyzerTab() {
                       href={githubTicketUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
+                      className={clsx("pressable flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20", FOCUS_RING)}
                     >
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       GitHub Issue Created
@@ -681,7 +733,7 @@ export default function LogAnalyzerTab() {
                     <button
                       onClick={() => void handleFileGitHubIssue()}
                       disabled={githubStatus === "loading"}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-[#24292e] hover:bg-[#32383e] disabled:opacity-60 disabled:cursor-not-allowed text-white transition-colors"
+                      className={clsx("pressable flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-[#24292e] hover:bg-[#32383e] border border-white/10 disabled:opacity-60 disabled:cursor-not-allowed text-white", FOCUS_RING)}
                     >
                       {githubStatus === "loading" ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -692,7 +744,7 @@ export default function LogAnalyzerTab() {
                     </button>
                   )}
                   {githubStatus === "error" && githubErrorMsg && (
-                    <p className="text-[10px] text-red-400 max-w-[220px] leading-tight">{githubErrorMsg}</p>
+                    <p className="text-[11px] text-red-400 max-w-[220px] leading-tight">{githubErrorMsg}</p>
                   )}
                 </div>
 
@@ -701,13 +753,13 @@ export default function LogAnalyzerTab() {
                   <div className="flex flex-col gap-1.5">
                     <button
                       onClick={handleSelfHealClick}
-                      className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all bg-sky-600 hover:bg-sky-500 text-white shadow-lg"
+                      className={clsx("pressable flex items-center justify-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white shadow-sm shadow-black/30", FOCUS_RING)}
                     >
                       <Sparkles className="w-3.5 h-3.5" />
                       Apply Self-Heal Fix
                     </button>
                     {!testCode.trim() && (
-                      <p className="text-[10px] text-slate-600 max-w-[200px] leading-tight">
+                      <p className="text-[11px] text-slate-500 max-w-[200px] leading-tight">
                         Paste the failing test code above first
                       </p>
                     )}
@@ -718,7 +770,7 @@ export default function LogAnalyzerTab() {
                 <button
                   onClick={() => void handleAnalyze()}
                   disabled={isAnalyzing}
-                  className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all bg-surface-700 hover:bg-surface-600 text-slate-200 border border-surface-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={clsx("pressable flex items-center justify-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-surface-700/80 hover:bg-surface-600 text-slate-200 border border-surface-600 disabled:opacity-50 disabled:cursor-not-allowed", FOCUS_RING)}
                 >
                   {isAnalyzing ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -731,15 +783,6 @@ export default function LogAnalyzerTab() {
             </div>
             </div>
 
-            {/* Category tag */}
-            {result.category && result.category !== "unknown" && (
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <span>Category:</span>
-                <span className="bg-surface-700 text-slate-400 px-2 py-0.5 rounded font-mono">
-                  {result.category}
-                </span>
-              </div>
-            )}
           </div>
         )}
       </div>

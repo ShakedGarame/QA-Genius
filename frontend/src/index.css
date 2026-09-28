@@ -9,6 +9,10 @@
 
   :root {
     color-scheme: dark;
+    /* Motion tokens (mirrored in tailwind.config.ts for utility classes). */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   }
 
   html,
@@ -22,12 +26,18 @@
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
-  /* Visible keyboard focus — improves accessibility for tab/keyboard users */
+  /* One focus treatment for the whole app — a soft sky ring that only shows
+     for keyboard navigation. Components that draw their own ring (inputs,
+     buttons via `focus-visible:ring-*`) opt out of the outline. */
   :focus-visible {
-    outline: 2px solid #38bdf8;
+    outline: 2px solid rgb(56 189 248 / 0.7);
     outline-offset: 2px;
+    border-radius: 6px;
   }
 
   button:focus:not(:focus-visible),
@@ -35,20 +45,42 @@
     outline: none;
   }
 
+  ::selection {
+    background: rgb(56 189 248 / 0.25);
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
-    background: #161b22;
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: #30363d;
-    border-radius: 3px;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: #3d444d;
+    background-clip: padding-box;
+  }
+
+  /* Reduced motion = fewer, gentler animations, not zero: keep opacity/color
+     fades that aid comprehension, drop movement. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
+    .pressable:active {
+      transform: none !important;
+    }
   }
 }
 
@@ -60,6 +92,7 @@
 
   .qa-data-table {
     @apply w-full text-left text-xs;
+    font-variant-numeric: tabular-nums;
   }
 
   .qa-data-table thead {
@@ -67,19 +100,46 @@
   }
 
   .qa-data-table th {
-    @apply px-4 py-2.5 font-medium;
+    @apply px-4 py-2.5 font-medium text-[11px];
   }
 
   .qa-data-table tbody {
-    @apply divide-y divide-surface-700;
+    @apply divide-y divide-surface-700/70;
   }
 
   .qa-data-table tr {
-    @apply hover:bg-surface-800/40 transition-colors;
+    @apply transition-colors;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .qa-data-table tbody tr:hover {
+      @apply bg-surface-800/50;
+    }
   }
 
   .qa-data-table td {
-    @apply px-4 py-2.5;
+    @apply px-4 py-3 align-middle;
+  }
+
+  /* Press feedback for anything clickable: a subtle scale-down confirms the
+     interface heard the user. Transform-only so it never triggers layout. */
+  .pressable {
+    transition-property: transform, color, background-color, border-color, opacity, box-shadow;
+    transition-duration: 160ms;
+    transition-timing-function: var(--ease-out);
+  }
+  .pressable:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* Skeleton block with a moving sheen — linear because it's constant motion. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-surface-700/60;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.04), transparent);
   }
 }
 
@@ -93,16 +153,6 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-  }
-
-  .glass {
-    backdrop-filter: blur(12px);
-    background: rgba(22, 27, 34, 0.8);
-    border: 1px solid rgba(48, 54, 61, 0.6);
-  }
-
-  .glow-blue {
-    box-shadow: 0 0 20px rgba(14, 165, 233, 0.15);
   }
 
   /* Visually masks a plain text input like a password field, without using

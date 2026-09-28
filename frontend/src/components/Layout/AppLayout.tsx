@@ -20,6 +20,7 @@ import clsx from "clsx";
 import type { AuthUser } from "../../hooks/useAuth";
 import CommandPalette, { CommandItem } from "./CommandPalette";
 import AssistantWidget from "./AssistantWidget";
+import { Skeleton } from "../ui/layout";
 
 // Lazy-loaded so each tab's code (and, for Test Generator, Monaco) only
 // downloads once the user actually visits that tab, instead of all six
@@ -31,10 +32,20 @@ const HistoryTab = lazy(() => import("../../pages/tabs/HistoryTab"));
 const DashboardTab = lazy(() => import("../../pages/tabs/DashboardTab"));
 const SettingsTab = lazy(() => import("../../pages/tabs/SettingsTab"));
 
+// Neutral page-shaped placeholder while a tab's chunk downloads — a toolbar
+// row plus a couple of content blocks, so the layout doesn't jump on arrival.
 function TabLoadingFallback() {
   return (
-    <div className="flex-1 flex items-center justify-center py-16">
-      <div className="w-8 h-8 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+    <div className="flex-1 flex flex-col" role="status" aria-label="Loading">
+      <div className="flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-surface-700">
+        <Skeleton className="h-8 w-56 rounded-lg" />
+        <Skeleton className="h-8 w-24 rounded-lg ml-auto" />
+      </div>
+      <div className="p-4 sm:p-6 space-y-3">
+        <Skeleton className="h-24 w-full rounded-xl" />
+        <Skeleton className="h-24 w-full rounded-xl opacity-70" />
+        <Skeleton className="h-24 w-full rounded-xl opacity-40" />
+      </div>
     </div>
   );
 }
@@ -95,28 +106,28 @@ function NavButton({
       onClick={onClick}
       aria-current={isActive ? "page" : undefined}
       className={clsx(
-        "w-full flex items-center gap-3 rounded-xl text-left transition-all",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
-        compact ? "px-3 py-2" : "px-3 py-3",
+        // Nav is clicked constantly — color-only transitions, no movement.
+        "pressable w-full flex items-center gap-3 rounded-xl text-left border",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
+        compact ? "px-2.5 py-2" : "px-2.5 py-2.5",
         isActive
-          ? "bg-surface-700/90 text-white shadow-sm border border-surface-500/60"
-          : "text-slate-400 hover:text-slate-100 hover:bg-surface-800/80 border border-transparent"
+          ? "bg-surface-700/70 text-white border-surface-600"
+          : "text-slate-400 hover:text-slate-100 hover:bg-surface-800 border-transparent"
       )}
     >
       <div className={clsx(
-        "flex-shrink-0 rounded-lg flex items-center justify-center transition-all",
+        "flex-shrink-0 rounded-lg flex items-center justify-center transition-colors",
         compact ? "w-8 h-8" : "w-9 h-9",
-        isActive ? `bg-gradient-to-br ${item.accent} shadow-md` : "bg-surface-700"
+        isActive ? `bg-gradient-to-br ${item.accent} shadow-sm shadow-black/30` : "bg-surface-700/80"
       )}>
-        <Icon className="w-4 h-4 text-white" aria-hidden />
+        <Icon className={clsx("w-4 h-4", isActive ? "text-white" : "text-slate-300")} aria-hidden />
       </div>
       <div className="min-w-0 flex-1">
-        <p className={clsx("font-medium leading-tight", compact ? "text-sm" : "text-sm")}>{item.label}</p>
+        <p className="text-sm font-medium leading-tight">{item.label}</p>
         {!compact && (
           <p className="text-[11px] text-slate-500 leading-snug mt-0.5 truncate">{item.description}</p>
         )}
       </div>
-      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-sky-400 flex-shrink-0" aria-hidden />}
     </button>
   );
 }
@@ -210,7 +221,7 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
         aria-haspopup="true"
         aria-label="User menu"
         className={clsx(
-          "flex items-center rounded-xl hover:bg-surface-700 border border-transparent hover:border-surface-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          "pressable flex items-center rounded-xl hover:bg-surface-700/70 border border-transparent hover:border-surface-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70",
           mobile ? "p-1" : "gap-2.5 px-3 py-2"
         )}
       >
@@ -224,7 +235,7 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
               )}
             </div>
             <ChevronDown
-              className={clsx("w-3.5 h-3.5 text-slate-500 flex-shrink-0 transition-transform", open && "rotate-180")}
+              className={clsx("w-3.5 h-3.5 text-slate-500 flex-shrink-0 transition-transform duration-200 ease-out", open && "rotate-180")}
               aria-hidden
             />
           </>
@@ -235,9 +246,11 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
         <div
           ref={menuRef}
           style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
-          className="z-[9999] w-52 bg-surface-700 border border-surface-500 rounded-xl shadow-2xl overflow-hidden animate-fade-in"
+          role="menu"
+          // Anchored to the trigger's top-right corner, so it scales from there.
+          className="z-[9999] w-56 bg-surface-800 border border-surface-600 rounded-xl shadow-2xl shadow-black/50 overflow-hidden origin-top-right animate-pop-in"
         >
-          <div className="px-4 py-3 border-b border-surface-600">
+          <div className="px-4 py-3 border-b border-surface-700">
             <div className="flex items-center gap-2.5">
               {avatar}
               <div className="min-w-0">
@@ -251,8 +264,9 @@ function UserDropdown({ user, onLogout, mobile = false }: { user: AuthUser; onLo
           <div className="py-1">
             <button
               type="button"
+              role="menuitem"
               onClick={() => { setOpen(false); onLogout(); }}
-              className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+              className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors focus-visible:outline-none focus-visible:bg-red-500/10"
             >
               <LogOut className="w-4 h-4 flex-shrink-0" aria-hidden />
               Sign out
@@ -290,24 +304,25 @@ function MobileNavDrawer({
   return (
     <>
       <div
-        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] lg:hidden animate-fade-in"
         onClick={onClose}
         aria-hidden
       />
       <aside
         id="mobile-nav"
-        className="fixed inset-y-0 right-0 z-50 w-[min(100vw-3rem,20rem)] flex flex-col bg-surface-800 border-l border-surface-600 shadow-2xl lg:hidden animate-fade-in"
+        // Slides in from the edge it lives on, with the iOS-style drawer curve.
+        className="fixed inset-y-0 right-0 z-50 w-[min(100vw-3rem,20rem)] flex flex-col bg-surface-800 border-l border-surface-600 shadow-2xl shadow-black/50 lg:hidden animate-drawer-in"
         aria-label="Mobile navigation"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-surface-600">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
           <p className="text-sm font-semibold text-white">Menu</p>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close menu"
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-surface-700 transition-colors"
+            className="pressable p-2 rounded-lg text-slate-400 hover:text-white hover:bg-surface-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden />
           </button>
         </div>
 
@@ -439,10 +454,10 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
 
       {/* ── Desktop sidebar ── */}
       <aside
-        className="hidden lg:flex w-72 flex-shrink-0 flex-col border-r border-surface-600 bg-surface-800/40"
+        className="hidden lg:flex w-72 flex-shrink-0 flex-col border-r border-surface-700 bg-surface-800/30"
         aria-label="Application navigation"
       >
-        <div className="px-5 py-6 border-b border-surface-600">
+        <div className="px-5 py-5 border-b border-surface-700">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-900/30" aria-hidden>
               <BrainCircuit className="w-6 h-6 text-white" />
@@ -454,7 +469,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           </div>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           <p className="px-3 pb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
             Workspace
           </p>
@@ -468,7 +483,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
           ))}
         </nav>
 
-        <div className="px-3 py-4 border-t border-surface-600 space-y-1.5">
+        <div className="px-3 py-3 border-t border-surface-700 space-y-1">
           {BOTTOM_NAV.map((item) => (
             <NavButton
               key={item.id}
@@ -492,7 +507,7 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
       {/* ── Main column ── */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Mobile header — single row, no duplicate tab bar */}
-        <header className="lg:hidden flex-shrink-0 border-b border-surface-600 bg-surface-800/90 backdrop-blur-sm safe-top">
+        <header className="lg:hidden flex-shrink-0 border-b border-surface-700 bg-surface-800/90 backdrop-blur-sm safe-top">
           <div className="flex items-center justify-between gap-2 px-3 py-2.5">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center flex-shrink-0" aria-hidden>
@@ -538,20 +553,20 @@ export default function AppLayout({ user, onLogout }: { user: AuthUser; onLogout
         />
 
         {/* Desktop page title bar */}
-        <header className="hidden lg:flex flex-shrink-0 items-center justify-between px-6 py-3 border-b border-surface-600 bg-surface-800/40 backdrop-blur-sm">
+        <header className="hidden lg:flex flex-shrink-0 items-center justify-between px-6 py-3 border-b border-surface-700 bg-surface-800/30 backdrop-blur-sm">
           <div>
-            <h2 className="text-lg font-semibold text-white">{activeItem.label}</h2>
-            <p className="text-sm text-slate-500 mt-0.5">{activeItem.description}</p>
+            <h2 className="text-lg font-semibold text-white tracking-tight">{activeItem.label}</h2>
+            <p className="text-sm text-slate-500">{activeItem.description}</p>
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-surface-700/60 hover:bg-surface-700 border border-surface-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+              className="pressable flex items-center gap-2 h-8 pl-3 pr-1.5 w-56 rounded-lg text-xs text-slate-500 hover:text-slate-300 bg-surface-900/60 hover:bg-surface-800 border border-surface-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70"
             >
               <Search className="w-3.5 h-3.5" aria-hidden />
-              <span>Search…</span>
-              <kbd className="text-[10px] font-mono bg-surface-800 border border-surface-600 rounded px-1.5 py-0.5">⌘K</kbd>
+              <span className="flex-1 text-left">Search…</span>
+              <kbd className="text-[10px] font-mono text-slate-400 bg-surface-800 border border-surface-600 rounded px-1.5 py-0.5">⌘K</kbd>
             </button>
             <UserDropdown user={user} onLogout={onLogout} />
           </div>

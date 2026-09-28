@@ -130,7 +130,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 type="button"
                 onClick={() => void handleLogin()}
                 disabled={loading}
-                className="flex items-center justify-center gap-3 w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 border border-sky-500 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                className="flex items-center justify-center gap-3 w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 border border-sky-500 rounded-xl text-sm font-medium text-white pressable focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" aria-hidden />
@@ -226,7 +226,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 <button
                   type="submit"
                   disabled={adminLoading}
-                  className="flex items-center justify-center gap-3 w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 border border-sky-500 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                  className="flex items-center justify-center gap-3 w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 border border-sky-500 rounded-xl text-sm font-medium text-white pressable focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
                 >
                   {adminLoading ? (
                     <Loader2 className="w-5 h-5 animate-spin" aria-hidden />
