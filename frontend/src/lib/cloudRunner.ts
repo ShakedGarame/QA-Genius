@@ -325,7 +325,7 @@ export async function executeTestRun(
 
   if (options?.signal?.aborted) return null;
 
-  const { pendingWorkflowRunId, streamResult, testRunId, dispatchStartedAt } =
+  const { pendingWorkflowRunId, streamResult, testRunId, dispatchStartedAt, streamError } =
     await consumeRunTestStream(res, {
       onStatus: handlers.onStatus,
       onOutput: handlers.onOutputAppend,
@@ -338,6 +338,23 @@ export async function executeTestRun(
       await finishTestRun(testRunId, { status: "FAILED" });
     }
     return null;
+  }
+
+  // The backend reported the run never started (e.g. GitHub rejected the token).
+  // There is no workflow to wait for — polling for one would only spin for minutes.
+  if (streamError && !streamResult && !pendingWorkflowRunId) {
+    const failed: RunTestResult = {
+      testId: testRunId ?? "not-started",
+      testRunId,
+      status: "error",
+      output: `⚠ ${streamError}`,
+      duration: 0,
+      errorDetails: streamError,
+    };
+    handlers.onResult?.(failed);
+    handlers.onStatus?.("⚠ Run could not start", 100);
+    void persistRunCompletion(testRunId, failed);
+    return failed;
   }
 
   const finalResult = await resolveCloudRunAfterStream(
@@ -419,6 +436,7 @@ export async function consumeRunTestStream(
   streamResult?: RunTestResult;
   testRunId?: string;
   dispatchStartedAt?: number;
+  streamError?: string;
 }> {
   if (!res.body) throw new Error("No response body");
 
@@ -429,6 +447,7 @@ export async function consumeRunTestStream(
   let streamResult: RunTestResult | undefined;
   let testRunId: string | undefined;
   let dispatchStartedAt: number | undefined;
+  let streamError: string | undefined;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -476,7 +495,8 @@ export async function consumeRunTestStream(
             22
           );
         } else if (eventType === "error") {
-          handlers.onOutput?.(`\n⚠ ${data.message}\n`);
+          streamError = String(data.message ?? "Run failed to start");
+          handlers.onOutput?.(`\n⚠ ${streamError}\n`);
         }
       } catch {
         // ignore malformed chunks
@@ -484,7 +504,7 @@ export async function consumeRunTestStream(
     }
   }
 
-  return { pendingWorkflowRunId, streamResult, testRunId, dispatchStartedAt };
+  return { pendingWorkflowRunId, streamResult, testRunId, dispatchStartedAt, streamError };
 }
 
 export function buildRunTestHeaders(): Record<string, string> {

@@ -62,7 +62,7 @@ export default function ExecutionConsole({
       ) : (
         <XCircle className="w-3.5 h-3.5" />
       )}
-      {result.status === "passed" ? "PASSED" : "FAILED"}
+      {result.status === "passed" ? "PASSED" : result.status === "error" ? "NOT RUN" : "FAILED"}
       {result.duration > 0 && (
         <span className="text-slate-500 font-normal ml-1">
           ({formatDuration(result.duration)})

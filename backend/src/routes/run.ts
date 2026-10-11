@@ -6,13 +6,14 @@ import { spawn } from "child_process";
 import { v4 as uuidv4 } from "uuid";
 import { getGeneratedTestCode } from "../db.js";
 import type { DbUser } from "../db.js";
-import { extractGitHubTokenFromRequest } from "../lib/githubToken.js";
+import { extractGitHubTokenFromRequest, hasUserGitHubToken } from "../lib/githubToken.js";
 import { sendError, logError, normalizeError } from "../lib/errors.js";
 import {
   findDispatchRun,
   resolveCloudRunStatus,
   triggerPlaywrightWorkflow,
   fetchRunArtifacts,
+  GitHubApiError,
 } from "../services/githubActions.js";
 import {
   createTestRun,
@@ -43,6 +44,21 @@ interface RunTestRequest {
 
 function sendSSE(res: Response, event: string, data: unknown) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+/** A run that never reached a runner would otherwise sit at RUNNING forever. */
+function markRunFailed(userId: string, dbRunId: string) {
+  void updateTestRun(userId, dbRunId, { status: "FAILED" }).catch((err) =>
+    console.error("[test-run] update failed:", err)
+  );
+}
+
+/** Says which token GitHub rejected — a PAT saved in the browser overrides the server's. */
+function tokenSourceHint(req: Request, err: unknown): string {
+  if (!(err instanceof GitHubApiError) || ![401, 403, 404].includes(err.githubStatus)) return "";
+  return hasUserGitHubToken(req)
+    ? " The token in use is the one saved in this browser under Settings → Cloud Test Runner."
+    : " The token in use is the server's GITHUB_ACTIONS_PAT environment variable.";
 }
 
 async function resolveSpecCode(
@@ -108,6 +124,7 @@ async function runViaGitHubActions(
       message:
         "Cloud test runner is not configured. The site owner must add GITHUB_ACTIONS_PAT in Vercel environment variables (or paste a GitHub PAT in Settings → Cloud Test Runner).",
     });
+    markRunFailed(userId, dbRunId);
     res.end();
     return;
   }
@@ -115,6 +132,7 @@ async function runViaGitHubActions(
   const resolved = await resolveSpecCode(userId, body);
   if ("error" in resolved) {
     sendSSE(res, "error", { message: resolved.error });
+    markRunFailed(userId, dbRunId);
     res.end();
     return;
   }
@@ -140,7 +158,11 @@ async function runViaGitHubActions(
   } catch (err) {
     const { safeMessage } = normalizeError(err);
     logError(req, err);
-    sendSSE(res, "error", { message: safeMessage, requestId: req.id });
+    sendSSE(res, "error", {
+      message: safeMessage + tokenSourceHint(req, err),
+      requestId: req.id,
+    });
+    markRunFailed(userId, dbRunId);
     res.end();
     return;
   }

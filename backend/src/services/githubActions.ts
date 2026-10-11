@@ -1,4 +1,5 @@
 import AdmZip from "adm-zip";
+import { AppError } from "../lib/errors.js";
 
 const GITHUB_API = "https://api.github.com";
 const DEFAULT_REPO = process.env.GITHUB_ACTIONS_REPO ?? "ShakedGarame/QA-Genius";
@@ -59,6 +60,30 @@ export interface CloudRunStatus {
   errorDetails?: string;
 }
 
+/** A non-2xx GitHub REST response. Carries a client-safe message so an expired or
+ * under-scoped token surfaces as an actionable error instead of a generic 500;
+ * the raw GitHub response stays in `message` for the server log only. */
+export class GitHubApiError extends AppError {
+  githubStatus: number;
+
+  constructor(githubStatus: number, path: string, body: string) {
+    super(502, describeGitHubFailure(githubStatus));
+    this.name = "GitHubApiError";
+    this.githubStatus = githubStatus;
+    this.message = `GitHub API ${path} failed (${githubStatus}): ${body.slice(0, 300)}`;
+  }
+}
+
+function describeGitHubFailure(status: number): string {
+  if (status === 401) {
+    return "GitHub rejected the cloud runner token (401 Bad credentials) — it has expired or been revoked. Create a new GitHub token and update it.";
+  }
+  if (status === 403 || status === 404) {
+    return `GitHub denied the cloud runner request (${status}) — the token doesn't have access to ${DEFAULT_REPO}. It needs the 'repo' scope.`;
+  }
+  return `GitHub API request failed (${status}), please try again`;
+}
+
 function parseRepo(slug = DEFAULT_REPO): { owner: string; repo: string } {
   const [owner, repo] = slug.split("/");
   if (!owner || !repo) throw new Error("Invalid GITHUB_ACTIONS_REPO — expected owner/repo");
@@ -82,7 +107,7 @@ async function githubJson<T>(token: string, path: string, init?: RequestInit): P
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`GitHub API ${path} failed (${res.status}): ${text.slice(0, 300)}`);
+    throw new GitHubApiError(res.status, path, text);
   }
 
   if (res.status === 204) return {} as T;

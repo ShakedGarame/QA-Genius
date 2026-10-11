@@ -777,7 +777,9 @@ export default function TestGeneratorTab() {
   // error event) never gets a populated result, but the terminal has already
   // moved past "running" — the banner still needs to show rather than
   // silently vanish, so anything short of a genuine "passed" counts.
-  const showFailureAnalyzer = stage === "executed" && !isRunning && runResult?.status !== "passed";
+  // "error" = the run never started (infrastructure), so there is no test failure to analyze.
+  const showFailureAnalyzer =
+    stage === "executed" && !isRunning && runResult?.status !== "passed" && runResult?.status !== "error";
 
   useEffect(() => {
     if (showFailureAnalyzer) {

@@ -1,7 +1,7 @@
 import type { Request } from "express";
 
 /** User-supplied GitHub PAT from browser localStorage (sent per request). */
-export function extractGitHubTokenFromRequest(req: Request): string | undefined {
+function extractUserGitHubToken(req: Request): string | undefined {
   const userHeader = req.headers["x-user-github-token"];
   if (typeof userHeader === "string" && userHeader.trim()) {
     return userHeader.trim();
@@ -17,6 +17,18 @@ export function extractGitHubTokenFromRequest(req: Request): string | undefined 
   if (typeof bodyToken === "string" && bodyToken.trim()) {
     return bodyToken.trim();
   }
+
+  return undefined;
+}
+
+/** True when the request carries its own PAT, which takes priority over the server's. */
+export function hasUserGitHubToken(req: Request): boolean {
+  return Boolean(extractUserGitHubToken(req));
+}
+
+export function extractGitHubTokenFromRequest(req: Request): string | undefined {
+  const userToken = extractUserGitHubToken(req);
+  if (userToken) return userToken;
 
   // Optional server-side fallback for ops (never required for end users).
   const envToken = process.env.GITHUB_ACTIONS_PAT?.trim();
